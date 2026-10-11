@@ -220,7 +220,10 @@ def test_unknown_config_key_rejected():
 
 
 def test_shipped_config_loads_and_matches_defaults():
-    assert load_config("config.toml") == Config()
+    shipped = load_config("config.toml")
+    assert shipped.jev.model not in ("", "jev-latest")      # must be pinned
+    shipped.jev.model = ""
+    assert shipped == Config()
 
 
 def test_calibration_labels_use_only_forward_prices():
