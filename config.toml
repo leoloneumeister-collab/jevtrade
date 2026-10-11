@@ -1,0 +1,61 @@
+# Every threshold lives here, never in a prompt. Edit numbers, not prompts.
+
+[jev]
+# Pin an exact model name. Run `jevbot models` to list what your account can use.
+# "jev-latest" is a moving alias and the bot refuses to run live on it.
+model = ""
+block_ms = 300
+deadline_ms = 250        # answer later than this = hold for the block
+breaker_after = 3        # consecutive Jev failures before code-only rules take over
+retry_every = 20         # while the breaker is open, probe Jev every N blocks
+
+[policy]
+toxic_pull = 0.60        # P(informed flow) above this: pull quotes (cheap mistake, low bar)
+stress_widen = 0.70      # P(thin book) above this: widen
+quote_min_score = 2.0    # quote_environment level needed to quote both sides
+quote_min_conf = 0.80    # confidence gate for tight quoting (expensive mistake, high bar)
+wide_min_score = 1.0
+crisis_conf = 0.60       # regime == crisis at this confidence: stand down
+low_conf = 0.50          # below this on quote_environment: half size
+direction_min_conf = 0.75
+direction_tilt_bps = 0.0 # 0 = ignore Jev's direction until calibration proves it earns its keep
+widen_mult = 3.0
+wide_mult = 2.0
+
+[pricing]                # Avellaneda-Stoikov style, all in code
+gamma = 1.0              # inventory risk aversion
+horizon_blocks = 100
+base_half_spread_bps = 2.0
+vol_spread_k = 0.5       # extra half-spread bps per bps of per-block vol
+min_half_spread_bps = 1.0
+skew_bps = 1.0           # extra reservation shift per level of inventory pressure
+base_size = 5.0
+tick_size = 0.0001
+
+[risk]                   # hard limits, checked against the venue's own ledger, never the model
+max_position = 40.0
+max_order_size = 10.0
+max_daily_loss = 25.0
+max_drawdown = 40.0
+max_hold_seconds = 900.0
+max_data_age_ms = 1500.0
+max_leverage = 3.0
+max_venue_errors = 5
+max_decision_ms = 250.0
+
+[paper]
+capital = 1000.0
+maker_fee_bps = 1.0
+order_cost = 0.001       # per place or cancel (gas / API cost), in quote currency
+queue_factor = 0.5       # fraction of a trade that can reach us (conservative)
+exit_slippage_bps = 10.0 # slippage when flattening on a kill
+
+[run]
+blocks = 20000
+seed = 7
+warmup_blocks = 120
+order_ttl_blocks = 30    # resting orders older than this are cancelled
+replace_bps = 0.75       # keep resting quotes unless they moved more than this (saves fees)
+journal = "runs/journal.jsonl"
+kill_file = "KILL"
+vol_long_halflife_blocks = 20000

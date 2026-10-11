@@ -1,0 +1,19 @@
+[project]
+name = "jevbot"
+version = "0.1.0"
+description = "Paper-trading market maker: Jev for judgment, code for everything else"
+requires-python = ">=3.11"
+dependencies = ["typesafe-sdk>=0.7.4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+jevbot = "jevbot.cli:main"
+
+[tool.setuptools]
+packages = ["jevbot"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
