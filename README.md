@@ -27,3 +27,19 @@ feed -> state.py (math) -> jev.py (6 atomic questions, 1 call, hard deadline)
 - Noul answers carry a probability only; Choice/Score also carry `confidence`.
 - The bot refuses `jev-latest` and halts quoting if the server answers with a different model than the pinned one.
 - No retries on the Jev call: a retry blows the block deadline. Late means hold.
+
+## Polymarket (read-only feed, paper trading only)
+```
+jevbot --config config.polymarket.toml markets                      # pick a liquid, mid-range market, copy its YES token id
+jevbot --config config.polymarket.toml run --feed polymarket --token <ID> --mode rules --blocks 600 --record runs/raw.jsonl
+jevbot --config config.polymarket.toml run --feed replay --replay runs/raw.jsonl --mode rules
+```
+- **First thing to do with live access:** record a short session and read `runs/raw.jsonl`. The message schemas come from
+  the open-source `polymarket-apis` client, not from live traffic. The book tracker compares itself with the venue's own
+  best bid/ask on every update and logs a warning if they ever disagree.
+- Recorded sessions replay deterministically, so you can re-run the same real data after every config change.
+- Unverified assumptions, check them: maker fee is 0 (`maker_fee_bps`), no per-order cost (`order_cost`), `side` in
+  `last_trade_price` is the aggressor, size in `price_change` is the new total at that level.
+- Paper fills assume half of each print reaches you (`queue_factor`). Real queue position is unknown, so treat paper
+  profit as an upper bound.
+- Binary markets pay 0 or 1 at resolution. The picker avoids prices near 0/1 and markets ending within 7 days.

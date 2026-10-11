@@ -36,7 +36,7 @@ class Fill:
 class PaperVenue:
     def __init__(self, cfg: PaperCfg):
         self.cfg = cfg
-        self.cash = 0.0
+        self.cash = cfg.capital          # equity = capital + pnl; leverage is measured against it
         self.inv = 0.0
         self.avg_entry = 0.0
         self.fees = 0.0

@@ -28,6 +28,10 @@ class PolicyCfg:
     direction_tilt_bps: float = 0.0
     widen_mult: float = 3.0
     wide_mult: float = 2.0
+    rules_max_spread_bps: float = 8.0      # code-only fallback: quote only if the spread is sane for THIS venue
+    rules_max_vol_ratio: float = 1.5
+    rules_flow_band: float = 0.2           # |buy ratio - 0.5| must stay below this
+    rules_pressure_step: float = 12.0      # inventory per pressure level
 
 
 @dataclass

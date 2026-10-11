@@ -20,6 +20,7 @@ class Tick:
     asks: tuple[tuple[float, float], ...]
     trades: tuple[tuple[float, float, str], ...]  # (price, size, aggressor side "buy"|"sell")
     ref_mid: float | None = None
+    data_age_ms: float = 0.0                      # time since the venue last proved it is alive
 
 
 class MarketFeed(Protocol):

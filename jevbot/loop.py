@@ -109,8 +109,13 @@ class Bot:
             placed.append({"side": side, "px": q.px, "size": q.size, "ok": o is not None})
         return placed
 
-    async def step(self, tick: Tick, wall_data_age_ms: float = 0.0) -> None:
+    async def step(self, tick: Tick) -> None:
         v, cfg = self.venue, self.cfg
+        wall_data_age_ms = tick.data_age_ms
+        ts = getattr(self.feed, "tick_size", None)
+        if ts and abs(ts - cfg.pricing.tick_size) > 1e-12:
+            log.warning("tick size %s -> %s (from venue)", cfg.pricing.tick_size, ts)
+            cfg.pricing.tick_size = ts
         fills = v.process_tick(tick)
         v.expire(tick.block, cfg.run.order_ttl_blocks)
         snap = self.engine.update(tick, v)

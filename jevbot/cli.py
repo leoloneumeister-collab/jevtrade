@@ -18,9 +18,24 @@ from .report import fee_check, print_report
 from .venue import PaperVenue
 
 
-def _bot(cfg: Config, mode: str, journal: str | None, blocks: int | None, realtime: bool = False) -> Bot:
+def _feed(cfg: Config, a, n: int, realtime: bool = False):
+    kind = getattr(a, "feed", "synthetic")
+    if kind == "polymarket":
+        from .polymarket import LiveFeed
+        if not a.token:
+            sys.exit("Pass --token <yes-token-id>. List candidates with `jevbot markets`.")
+        return LiveFeed(a.token, cfg.jev.block_ms, record=a.record, max_blocks=n)
+    if kind == "replay":
+        from .polymarket import ReplayFeed
+        if not a.replay:
+            sys.exit("Pass --replay <recorded.jsonl>.")
+        return ReplayFeed(a.replay, a.token, cfg.jev.block_ms, max_blocks=a.blocks)
+    return SyntheticFeed(cfg.run.seed, n, cfg.jev.block_ms, cfg.pricing.tick_size, realtime=realtime)
+
+
+def _bot(cfg: Config, mode: str, journal: str | None, blocks: int | None, realtime: bool = False, a=None) -> Bot:
     n = blocks or cfg.run.blocks
-    feed = SyntheticFeed(cfg.run.seed, n, cfg.jev.block_ms, cfg.pricing.tick_size, realtime=realtime)
+    feed = _feed(cfg, a, n, realtime)
     venue = PaperVenue(cfg.paper)
     if mode == "rules":
         decider = None
@@ -39,11 +54,11 @@ def _bot(cfg: Config, mode: str, journal: str | None, blocks: int | None, realti
 
 
 def cmd_run(a, cfg: Config) -> None:
-    bot = _bot(cfg, a.mode, a.journal or cfg.run.journal, a.blocks, realtime=a.realtime)
+    bot = _bot(cfg, a.mode, a.journal or cfg.run.journal, a.blocks, realtime=a.realtime, a=a)
     s = asyncio.run(bot.run())
     print(json.dumps(s, indent=2))
     print(fee_check(s))
-    if a.mode != "jev":
+    if a.feed == "synthetic" and a.mode != "jev":
         print("NOTE: synthetic data. This checks plumbing and fee math only, not an edge.")
 
 
@@ -61,6 +76,16 @@ def cmd_compare(a, cfg: Config) -> None:
         if kf.exists():
             kf.unlink()
     print("\n'double' is an offline stand-in, NOT Jev. Run `jevbot run --mode jev` with a real key for the real comparison.")
+
+
+def cmd_markets(a, cfg: Config) -> None:
+    from .polymarket import list_markets
+    rows = list_markets(min_days=a.min_days)
+    if not rows:
+        sys.exit("No candidates (or the Gamma API is unreachable from here).")
+    for r in rows[: a.top]:
+        print(f"{r['mid']:.3f} spr={r['spread']:.3f} tick={r['tick']} vol24h={r['vol24h']:>10,.0f} "
+              f"{r['days_left']:>6}d  {r['token_yes']}\n    {r['question']}")
 
 
 def cmd_models(a, cfg: Config) -> None:
@@ -95,8 +120,14 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run"); r.add_argument("--mode", choices=["rules", "double", "jev"], default="double")
     r.add_argument("--blocks", type=int); r.add_argument("--journal"); r.add_argument("--realtime", action="store_true")
+    r.add_argument("--feed", choices=["synthetic", "polymarket", "replay"], default="synthetic")
+    r.add_argument("--token", help="Polymarket outcome token id (the YES token from `jevbot markets`)")
+    r.add_argument("--record", help="save raw websocket messages here (for replay and schema checks)")
+    r.add_argument("--replay", help="recorded session to replay")
     r.set_defaults(fn=cmd_run)
     c = sub.add_parser("compare"); c.add_argument("--blocks", type=int, default=8000); c.set_defaults(fn=cmd_compare)
+    mk = sub.add_parser("markets"); mk.add_argument("--top", type=int, default=15); mk.add_argument("--min-days", type=float, default=7.0)
+    mk.set_defaults(fn=cmd_markets)
     sub.add_parser("models").set_defaults(fn=cmd_models)
     sub.add_parser("check").set_defaults(fn=cmd_check)
     rp = sub.add_parser("report"); rp.add_argument("journal", nargs="?"); rp.set_defaults(fn=lambda a, cfg: print_report(a.journal or cfg.run.journal))

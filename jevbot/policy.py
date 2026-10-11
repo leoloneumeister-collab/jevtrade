@@ -47,9 +47,9 @@ def compose_action(d: Decision, p: PolicyCfg) -> Action:
 
 def rules_only(snap: dict, p: PolicyCfg) -> Action:
     """Fallback when Jev is unavailable. Deliberately dumb and conservative."""
-    calm = snap["vol_vs_long"] < 1.5 and snap["spread_bps"] < 8
-    balanced = 0.3 < snap["aggressive_buy_ratio"] < 0.7
-    pressure = min(3, int(abs(snap["inventory"]) // 12))
+    calm = snap["vol_vs_long"] < p.rules_max_vol_ratio and snap["spread_bps"] < p.rules_max_spread_bps
+    balanced = abs(snap["aggressive_buy_ratio"] - 0.5) < p.rules_flow_band
+    pressure = min(3, int(abs(snap["inventory"]) // p.rules_pressure_step))
     if calm and balanced:
         return Action("QUOTE_WIDE", size_mult=0.5, spread_mult=p.wide_mult, pressure=pressure,
                       reason="rules-only")

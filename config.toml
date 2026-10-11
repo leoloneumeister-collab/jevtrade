@@ -21,6 +21,10 @@ direction_min_conf = 0.75
 direction_tilt_bps = 0.0 # 0 = ignore Jev's direction until calibration proves it earns its keep
 widen_mult = 3.0
 wide_mult = 2.0
+rules_max_spread_bps = 8.0   # code-only fallback limits
+rules_max_vol_ratio = 1.5
+rules_flow_band = 0.2
+rules_pressure_step = 12.0
 
 [pricing]                # Avellaneda-Stoikov style, all in code
 gamma = 1.0              # inventory risk aversion
