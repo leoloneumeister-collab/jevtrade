@@ -3,7 +3,7 @@
 [jev]
 # Pin an exact model name. Run `jevbot models` to list what your account can use.
 # "jev-latest" is a moving alias and the bot refuses to run live on it.
-model = ""
+model = "jev-1.13.0"
 block_ms = 300
 deadline_ms = 250        # answer later than this = hold for the block
 breaker_after = 3        # consecutive Jev failures before code-only rules take over
