@@ -6,6 +6,8 @@ Paper only. This app cannot place orders.
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import math
 import os
@@ -38,6 +40,24 @@ def _fwd(bars: list[Bar], i: int, h: int) -> float | None:
 
 
 # ---------------------------------------------------------------------------
+def _read_log(log_path: str) -> list[dict]:
+    p = Path(log_path)
+    return [json.loads(l) for l in p.read_text().splitlines() if l.strip()] if p.exists() else []
+
+
+def _log_read(log_path: str, out: dict, a: dict, label: str) -> bool:
+    """Append one prediction. One per (symbol, as-of day, horizon): re-asking the same question adds nothing."""
+    key = (out["symbol"], out["asof"], out["h"])
+    if any((q["symbol"], q["asof"], q["h"]) == key for q in _read_log(log_path)):
+        return False
+    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "a") as f:
+        f.write(json.dumps({"id": uuid.uuid4().hex[:8], "symbol": out["symbol"], "asof": out["asof"], "close": out["close"],
+                            "h": out["h"], "lean": label, "p_up": a["p_up"], "p_down": a["p_down"], "model": a["model"],
+                            "made_at": datetime.now(timezone.utc).isoformat()}) + "\n")
+    return True
+
+
 async def analyze(asker, sym: str, h: int, demo: bool, log_path: str | None) -> dict:
     bars, source = get_bars(sym, demo)
     snap = features(bars)
@@ -46,12 +66,9 @@ async def analyze(asker, sym: str, h: int, demo: bool, log_path: str | None) -> 
     out = {"symbol": sym, "h": h, "asof": bars[-1].d, "close": round(bars[-1].c, 2), "source": source,
            "demo": demo, "features": snap, "jev": a, "lean": label, "why": why,
            "series": [[b.d, round(b.c, 2)] for b in bars[-130:]]}
+    out["logged"] = False
     if log_path and not demo:       # demo prices are fake, so they never enter the scoreboard
-        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "a") as f:
-            f.write(json.dumps({"id": uuid.uuid4().hex[:8], "symbol": sym, "asof": out["asof"], "close": out["close"],
-                                "h": h, "lean": label, "p_up": a["p_up"], "p_down": a["p_down"], "model": a["model"],
-                                "made_at": datetime.now(timezone.utc).isoformat()}) + "\n")
+        out["logged"] = _log_read(log_path, out, a, label)
     return out
 
 
@@ -181,24 +198,46 @@ async def scan(asker, symbols: list[str], h: int, demo: bool, log_path: str | No
     return {"rows": ok + [r for r in rows if "error" in r], "truncated": truncated, "h": h, "demo": demo}
 
 
-def scoreboard(log_path: str, demo: bool = False) -> dict:
-    p = Path(log_path)
-    preds = [json.loads(l) for l in p.read_text().splitlines() if l.strip()] if p.exists() else []
+def _resolve(preds: list[dict], demo: bool = False) -> list[dict]:
+    """Attach the realized move to each prediction whose look-ahead period has passed."""
     cache: dict[str, list[Bar]] = {}
-    resolved, pending = [], 0
+    out = []
     for q in preds:
+        fwd, idx = None, None
         try:
             bars = cache.setdefault(q["symbol"], get_bars(q["symbol"], demo)[0])
-            i = next(k for k, b in enumerate(bars) if b.d == q["asof"])
-            fwd = _fwd(bars, i, q["h"])
+            idx = next(k for k, b in enumerate(bars) if b.d == q["asof"])
+            fwd = _fwd(bars, idx, q["h"])
         except Exception:
-            fwd = None
-        if fwd is None:
-            pending += 1
-        else:
-            resolved.append({**q, "fwd": fwd})
-    return {"made": len(preds), "pending": pending, "stats": summarize(resolved) if resolved else None,
-            "recent": resolved[-15:]}
+            pass
+        out.append({**q, "fwd": fwd, "i": idx})
+    return out
+
+
+def scoreboard(log_path: str, demo: bool = False) -> dict:
+    preds = _read_log(log_path)
+    res = _resolve(preds, demo)
+    done = [r for r in res if r["fwd"] is not None]
+    horizon = max((r["h"] for r in done), default=5)
+    return {"made": len(preds), "pending": len(res) - len(done),
+            "stats": summarize(done, horizon) if done else None, "recent": done[-15:]}
+
+
+CSV_COLUMNS = ["made_at", "symbol", "asof", "h", "lean", "p_up", "p_down", "close", "model", "status", "fwd_pct", "correct"]
+
+
+def scoreboard_csv(log_path: str, demo: bool = False) -> str:
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=CSV_COLUMNS, extrasaction="ignore", lineterminator="\n")
+    w.writeheader()
+    for r in _resolve(_read_log(log_path), demo):
+        done = r["fwd"] is not None
+        verdict = ""
+        if done and r["lean"] in ("LEAN UP", "LEAN DOWN"):
+            verdict = "yes" if (r["fwd"] > 0) == (r["lean"] == "LEAN UP") else "no"
+        w.writerow({**r, "status": "resolved" if done else "pending",
+                    "fwd_pct": "" if not done else round(r["fwd"], 3), "correct": verdict})
+    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -207,9 +246,11 @@ def make_handler(asker, model: str, log_path: str, has_key: bool):
         def log_message(self, *a):
             pass
 
-        def _send(self, code: int, body: bytes, ctype: str):
+        def _send(self, code: int, body: bytes, ctype: str, extra: dict | None = None):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
@@ -239,6 +280,9 @@ def make_handler(asker, model: str, log_path: str, has_key: bool):
                                                            int(q.get("n", 120)), demo, cost=cost)))
                 if u.path == "/api/scan":
                     return self._json(asyncio.run(scan(asker, q.get("symbols", "").split(","), h, demo, log_path)))
+                if u.path == "/api/scoreboard.csv":
+                    return self._send(200, scoreboard_csv(log_path, demo).encode(), "text/csv; charset=utf-8",
+                                      {"Content-Disposition": 'attachment; filename="jev_scoreboard.csv"'})
                 if u.path == "/api/scoreboard":
                     return self._json(scoreboard(log_path, demo))
                 self._send(404, b"not found", "text/plain")
@@ -257,16 +301,22 @@ def make_handler(asker, model: str, log_path: str, has_key: bool):
 DEFAULT_MODEL = "jev-1.13.0"
 
 
+def make_asker(model: str):
+    async def asker(snap, h):
+        # one client per event loop: asyncio.run() makes a fresh loop per request
+        return await ask(_client(model), model, snap, h)
+    return asker
+
+
+DEFAULT_WATCHLIST = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,JPM,XOM,JNJ,WMT"
+
+
 def serve(model: str, port: int = 8000, log_path: str = "runs/predictions.jsonl", open_browser: bool = True) -> None:
     import webbrowser
     model = model if model not in ("", "jev-latest") else DEFAULT_MODEL
     key = bool(os.environ.get("TYPESAFE_API_KEY"))
 
-    async def asker(snap, h):
-        # one client per event loop: asyncio.run() makes a fresh loop per request
-        return await ask(_client(model), model, snap, h)
-
-    handler, srv = make_handler(asker, model, log_path, key), None
+    handler, srv = make_handler(make_asker(model), model, log_path, key), None
     for p in range(port, port + 11):                      # port busy? try the next ones
         try:
             srv = ThreadingHTTPServer(("127.0.0.1", p), handler)

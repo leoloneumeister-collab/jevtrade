@@ -93,6 +93,23 @@ def cmd_web(a, cfg: Config) -> None:
     serve(cfg.jev.model, a.port, open_browser=not a.no_browser)
 
 
+def cmd_scan(a, cfg: Config) -> None:
+    """One pass over a watchlist: print the table and save every read to the scoreboard. Made for cron/launchd."""
+    from . import stock_app
+    if not os.environ.get("TYPESAFE_API_KEY"):
+        sys.exit("Set TYPESAFE_API_KEY first.")
+    model = cfg.jev.model if cfg.jev.model not in ("", "jev-latest") else stock_app.DEFAULT_MODEL
+    res = asyncio.run(stock_app.scan(stock_app.make_asker(model), (a.symbols or stock_app.DEFAULT_WATCHLIST).split(","),
+                                     a.h, a.demo, a.log))
+    for r in res["rows"]:
+        if r.get("error"):
+            print(f"{r['symbol']:<8} ERROR {r['error']}")
+        else:
+            print(f"{r['symbol']:<8} {r['lean']:<10} up {r['p_up']:.0%}  down {r['p_down']:.0%}  close {r['close']}  ({r['asof']})")
+    if all(r.get("error") for r in res["rows"]):
+        sys.exit(1)
+
+
 def cmd_models(a, cfg: Config) -> None:
     from typesafe_sdk import TypeSafeClient
     for m in TypeSafeClient().models.list().models:
@@ -134,6 +151,9 @@ def main() -> None:
     mk = sub.add_parser("markets"); mk.add_argument("--top", type=int, default=15); mk.add_argument("--min-days", type=float, default=7.0)
     mk.set_defaults(fn=cmd_markets)
     w = sub.add_parser("web"); w.add_argument("--port", type=int, default=8000); w.add_argument("--no-browser", action="store_true"); w.set_defaults(fn=cmd_web)
+    sc = sub.add_parser("scan"); sc.add_argument("--symbols"); sc.add_argument("--h", type=int, default=5)
+    sc.add_argument("--log", default="runs/predictions.jsonl"); sc.add_argument("--demo", action="store_true")
+    sc.set_defaults(fn=cmd_scan)
     sub.add_parser("models").set_defaults(fn=cmd_models)
     sub.add_parser("check").set_defaults(fn=cmd_check)
     rp = sub.add_parser("report"); rp.add_argument("journal", nargs="?"); rp.set_defaults(fn=lambda a, cfg: print_report(a.journal or cfg.run.journal))

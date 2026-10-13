@@ -68,3 +68,8 @@ That means no server is listening. Check the terminal where you ran `jevbot web`
 - If it printed an error or went back to the prompt, the app stopped. Copy the error.
 - `jevbot` not found? Use `python -m jevbot web` (Windows: `py -m jevbot web`) from the project folder with the venv active.
 - The app opens your browser by itself once the server is ready (`--no-browser` turns that off).
+
+### Daily scan and scoreboard export
+- `jevbot scan [--symbols A,B,C] [--h 5]` asks Jev about a watchlist and saves every read (one per ticker, day, horizon).
+- `docs/SCHEDULE.md` shows how to run it every weekday on a Mac. The scoreboard page has a CSV download.
+- Past tests compare Jev with a 3-line momentum rule and with simply holding, and count only non-overlapping signals.
