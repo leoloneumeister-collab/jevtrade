@@ -18,7 +18,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .market_data import Bar, check_symbol, demo_bars, fetch_bars
+from datetime import date
+
+from .errors import friendly_error
+from .market_data import Bar, check_symbol, demo_bars, fetch_bars_cached
 from .stock_features import features, momentum_rule
 from .stock_jev import StockPolicy, ask, lean
 
@@ -31,8 +34,18 @@ def _client(model: str):
     return AsyncTypeSafeClient(model=model, retry=RetryPolicy(max_retries=1), timeout=10)
 
 
+def _today() -> date:
+    return date.today()
+
+
+def stale_warning(last_bar: str, today: date | None = None) -> str | None:
+    """A weekend plus a holiday can leave the last bar 4 days old. Older than that and the read is about the past."""
+    age = ((today or _today()) - date.fromisoformat(last_bar)).days
+    return None if age <= 4 else f"The latest price is {age} days old, so this read describes the past, not today."
+
+
 def get_bars(sym: str, demo: bool) -> tuple[list[Bar], str]:
-    return (demo_bars(sym), "demo") if demo else fetch_bars(sym)
+    return (demo_bars(sym), "demo") if demo else fetch_bars_cached(sym)
 
 
 def _fwd(bars: list[Bar], i: int, h: int) -> float | None:
@@ -59,12 +72,13 @@ def _log_read(log_path: str, out: dict, a: dict, label: str) -> bool:
 
 
 async def analyze(asker, sym: str, h: int, demo: bool, log_path: str | None) -> dict:
-    bars, source = get_bars(sym, demo)
+    bars, source = await asyncio.to_thread(get_bars, sym, demo)   # network I/O off the event loop
     snap = features(bars)
     a = await asker(snap, h)
     label, why = lean(a)
     out = {"symbol": sym, "h": h, "asof": bars[-1].d, "close": round(bars[-1].c, 2), "source": source,
            "demo": demo, "features": snap, "jev": a, "lean": label, "why": why,
+           "warning": stale_warning(bars[-1].d) if not demo else None,
            "series": [[b.d, round(b.c, 2)] for b in bars[-130:]]}
     out["logged"] = False
     if log_path and not demo:       # demo prices are fake, so they never enter the scoreboard
@@ -148,7 +162,7 @@ def compare(jev: dict, rule: dict) -> str:
 
 
 async def backtest(asker, sym: str, h: int, n: int, demo: bool, conc: int = 6, cost: float = ROUND_TRIP_COST_PCT) -> dict:
-    bars, source = get_bars(sym, demo)
+    bars, source = await asyncio.to_thread(get_bars, sym, demo)
     n = max(10, min(n, 250))
     idx = list(range(max(60, len(bars) - h - n), len(bars) - h))
     sem = asyncio.Semaphore(conc)
@@ -191,7 +205,7 @@ async def scan(asker, symbols: list[str], h: int, demo: bool, log_path: str | No
                         "entry_score": j["entry_score"], "vol_regime": j["vol_regime"], "close": d["close"],
                         "asof": d["asof"], "warning": d.get("warning")}
             except Exception as e:
-                return {"symbol": raw.upper(), "error": str(e) if isinstance(e, ValueError) else f"{type(e).__name__}: {e}"}
+                return {"symbol": raw.upper(), "error": friendly_error(e)}
 
     rows = await asyncio.gather(*(one(s) for s in syms))
     ok = sorted((r for r in rows if "error" not in r), key=lambda r: -r["p_up"])
@@ -287,13 +301,9 @@ def make_handler(asker, model: str, log_path: str, has_key: bool):
                     return self._json(scoreboard(log_path, demo))
                 self._send(404, b"not found", "text/plain")
             except ValueError as e:
-                self._json({"error": str(e)}, 400)
+                self._json({"error": friendly_error(e)}, 400)
             except Exception as e:
-                msg = f"{type(e).__name__}: {e}"
-                if "Authentication" in type(e).__name__ or "401" in str(e):
-                    msg = ("TypeSafe rejected the API key (401). Stop the app with Ctrl+C, run ./start.sh again and "
-                           "paste the full key, with no spaces. Keys start with apikey_.")
-                self._json({"error": msg}, 502)
+                self._json({"error": friendly_error(e)}, 502)
 
     return H
 

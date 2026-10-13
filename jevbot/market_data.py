@@ -10,6 +10,9 @@ import json
 import math
 import random
 import re
+import threading
+import time
+import urllib.error
 import urllib.request
 import zlib
 from dataclasses import dataclass
@@ -61,17 +64,78 @@ def _stooq(sym: str) -> list[Bar]:
                 float(r.get("Volume") or 0)) for r in rows if r.get("Close")][-520:]
 
 
+_sleep = time.sleep
+_clock = time.monotonic
+
+
+def _transient(e: BaseException) -> bool:
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code == 429 or e.code >= 500
+    return isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError))
+
+
+def with_retry(fn, tries: int = 3, base: float = 0.5, sleep=None):
+    """Retry transient failures (network, 429, 5xx) with doubling backoff. Permanent errors raise at once."""
+    sleep = sleep or _sleep
+    for k in range(tries):
+        try:
+            return fn()
+        except Exception as e:
+            if not _transient(e) or k == tries - 1:
+                raise
+            sleep(base * 2 ** k)
+
+
+def validate_bars(bars: list[Bar]) -> None:
+    """Refuse data we cannot trust, rather than feed it to the model."""
+    if len(bars) < 80:
+        raise ValueError(f"need at least 80 daily bars, got {len(bars)}")
+    dates = [b.d for b in bars]
+    if dates != sorted(dates):
+        raise ValueError("bars are not in date order")
+    if len(set(dates)) != len(dates):
+        raise ValueError("duplicate dates in price data")
+    if any(min(b.o, b.h, b.l, b.c) <= 0 for b in bars):
+        raise ValueError("price data contains zero or negative prices")
+
+
 def fetch_bars(sym: str) -> tuple[list[Bar], str]:
     errs = []
     for name, fn in (("yahoo", _yahoo), ("stooq", _stooq)):
         try:
-            bars = fn(sym)
-            if len(bars) >= 80:
-                return bars, name
-            errs.append(f"{name}: only {len(bars)} bars")
+            bars = with_retry(lambda: fn(sym))
+            validate_bars(bars)
+            return bars, name
         except Exception as e:
-            errs.append(f"{name}: {e!r}")
+            errs.append(f"{name}: {e}")
     raise RuntimeError("Could not get price data (" + "; ".join(errs) + ")")
+
+
+_cache: dict[str, tuple[float, tuple[list[Bar], str]]] = {}
+_locks: dict[str, threading.Lock] = {}
+_lock = threading.Lock()                        # guards the two dicts only, never held during a fetch
+
+
+def clear_cache() -> None:
+    with _lock:
+        _cache.clear()
+        _locks.clear()
+
+
+def fetch_bars_cached(sym: str, ttl: float = 900.0) -> tuple[list[Bar], str]:
+    """15 minute cache so a scan or backtest never hammers a free source. Failures are not cached.
+    One lock per symbol: a burst for one ticker makes one fetch, different tickers fetch in parallel."""
+    with _lock:
+        sym_lock = _locks.setdefault(sym, threading.Lock())
+    with sym_lock:
+        with _lock:
+            hit = _cache.get(sym)
+        if hit and _clock() - hit[0] < ttl:
+            return hit[1]
+        res = fetch_bars(sym)
+        with _lock:
+            _cache[sym] = (_clock(), res)
+        return res
 
 
 def demo_bars(sym: str, n: int = 420) -> list[Bar]:

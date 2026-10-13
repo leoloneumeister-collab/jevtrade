@@ -93,7 +93,7 @@ function render(d){
   const keys=[['ret_5d_pct','5 day move %'],['ret_20d_pct','20 day move %'],['rsi14','RSI (14)'],['vs_sma50_pct','vs 50 day avg %'],['vol_20d_pct','daily swing %'],['pos_in_52w_range','52 week range (0-1)']];
   $('out').innerHTML=`<div class="card">
    <div class="mute">${d.symbol} closed at ${d.close} on ${d.asof} · ${d.h} day look ahead · data: ${d.source}${d.demo?' (FAKE)':''}</div>
-   <div class="lean ${cls}">${txt}</div><div>${d.why}</div>
+   <div class="lean ${cls}">${txt}</div><div>${d.why}</div>${d.warning?`<div class="warn" style="margin:10px 0 0">${d.warning}</div>`:''}
    <div class="bars">${bar('Up',j.p_up,'var(--up)')}${bar('Flat',j.p_flat,'var(--flat)')}${bar('Down',j.p_down,'var(--down)')}</div>
    <div class="grid">
      <div class="kv"><b>${(j.uptrend*100).toFixed(0)}%</b><span>chance it is in an uptrend</span></div>
