@@ -15,7 +15,7 @@ function render(d){
   const [cls,txt]=lab[d.lean],j=d.jev,f=d.features;
   const keys=[['ret_5d_pct','5 day move %'],['ret_20d_pct','20 day move %'],['rsi14','RSI (14)'],['vs_sma50_pct','vs 50 day avg %'],['vol_20d_pct','daily swing %'],['pos_in_52w_range','52 week range (0-1)']];
   $('out').innerHTML=`<div class="card">
-   <div class="mute">${esc(d.symbol)} closed at ${esc(d.close)} on ${esc(d.asof)} · ${esc(d.h)} day look ahead · data: ${esc(d.source)}${d.demo?' (FAKE)':''}</div>
+   <div class="mute">${esc(d.symbol)} closed at ${esc(d.close)} on ${esc(d.asof)} · ${esc(d.h)} day look ahead · data: ${esc(d.source)}${d.src==='file'?' (your CSV, historical)':''}${d.demo?' (FAKE)':''}</div>
    <div class="lean ${cls}">${txt}</div><div>${esc(d.why)}</div>${d.warning?`<div class="warn mt10">${esc(d.warning)}</div>`:''}
    <div class="bars">${bar('Up',j.p_up,'var(--up)')}${bar('Flat',j.p_flat,'var(--flat)')}${bar('Down',j.p_down,'var(--down)')}</div>
    <div class="grid">
@@ -44,12 +44,12 @@ function stats(s,title){
    ${cal?`<table><tr><th>Jev said chance of rise</th><th>days</th><th>actually rose</th></tr>${cal}</table>`:''}`}
 async function ask(){
   busy(true);$('btout').innerHTML='';$('out').innerHTML='<div class="card mute">Asking Jev...</div>';
-  try{const d=await api(`/api/analyze?symbol=${$('sym').value}&h=${$('h').value}&demo=${$('demo').checked?1:0}`);render(d);loadSb()}
+  try{const d=await api(`/api/analyze?symbol=${$('sym').value}&h=${$('h').value}&src=${$('src').value}`);render(d);loadSb()}
   catch(e){$('out').innerHTML=`<div class="card err">${esc(e.message)}</div>`}finally{busy(false)}}
 async function bt(){
   busy(true);$('btout').innerHTML=`<div class="card mute">Running about ${$('n').value} questions through Jev. Takes under a minute.</div>`;
-  try{const d=await api(`/api/backtest?symbol=${$('sym').value}&h=${$('h').value}&n=${$('n').value}&cost=${encodeURIComponent($('cost').value)}&demo=${$('demo').checked?1:0}`);
-    $('btout').innerHTML=`<div class="card">${stats(d.stats,'Jev, past test: '+d.symbol+(d.demo?' (FAKE prices)':''))}
+  try{const d=await api(`/api/backtest?symbol=${$('sym').value}&h=${$('h').value}&n=${$('n').value}&cost=${encodeURIComponent($('cost').value)}&src=${$('src').value}`);
+    $('btout').innerHTML=`<div class="card">${stats(d.stats,'Jev, past test: '+d.symbol+(d.demo?' (FAKE prices)':d.src==='file'?' (your CSV file)':''))}
       <h2 class="mt16">The 3-line momentum rule, same days</h2>${statCells(d.rule_stats)}
       <p class="verdict">${esc(d.comparison)}</p><p class="mute small2">${esc(d.caveat)}${d.errors?` ${d.errors} questions failed and were skipped.`:''}</p></div>`}
   catch(e){$('btout').innerHTML=`<div class="card err">${esc(e.message)}</div>`}finally{busy(false)}}
@@ -59,7 +59,7 @@ async function loadSb(){
   catch(e){$('sb').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 async function scan(){
   busy(true);$('scout').innerHTML='<span class="mute">Scanning...</span>';
-  try{const d=await api(`/api/scan?symbols=${encodeURIComponent($('wl').value)}&h=${$('h').value}&demo=${$('demo').checked?1:0}`);
+  try{const d=await api(`/api/scan?symbols=${encodeURIComponent($('wl').value)}&h=${$('h').value}&src=${$('src').value}`);
     const rows=d.rows.map(r=>r.error?`<tr><td>${esc(r.symbol)}</td><td colspan="4" class="err">${esc(r.error)}</td></tr>`:
       `<tr><td><b>${esc(r.symbol)}</b></td><td class="${lab[r.lean][0]}">${lab[r.lean][1]}</td><td>${(r.p_up*100).toFixed(0)}%</td><td>${(r.p_down*100).toFixed(0)}%</td><td>${esc(r.close)} <span class="mute">${esc(r.vol_regime)}</span></td></tr>`).join('');
     $('scout').innerHTML=`<table><tr><th>Ticker</th><th>Jev's lean</th><th>Up</th><th>Down</th><th>Last close</th></tr>${rows}</table>${d.truncated?'<p class="mute">List cut to 25 tickers.</p>':''}`;loadSb()}
@@ -68,3 +68,11 @@ $('sc').onclick=scan;
 $('go').onclick=ask;$('bt').onclick=bt;$('sym').addEventListener('keydown',e=>{if(e.key==='Enter')ask()});
 api('/api/status').then(s=>{if(!s.has_key){const el=$('status');el.hidden=false;el.textContent='TYPESAFE_API_KEY is not set on this computer, so Jev cannot be asked. Set it and restart the app.'}}).catch(()=>{});
 loadSb();
+
+async function fileHint(){
+  const el=$('filehint');
+  if($('src').value!=='file'){el.hidden=true;return}
+  try{const d=await api('/api/files');el.hidden=false;
+    el.textContent=d.symbols.length?'CSV files for: '+d.symbols.join(', '):'No CSV files yet. Run: jevbot import-csv FILE --symbol AAPL'}
+  catch(e){el.hidden=false;el.textContent=e.message}}
+$('src').onchange=fileHint;

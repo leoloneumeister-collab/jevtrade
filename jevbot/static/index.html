@@ -21,7 +21,8 @@
       <div><label for="n">Test length</label><select id="n"><option value="60">60 days</option><option value="120" selected>120 days</option><option value="250">250 days</option></select></div>
       <div><label for="cost">Cost per trade %</label><input id="cost" type="text" value="0.10" class="w70"></div>
       <button id="bt" class="alt">Run past test</button>
-      <label class="chk"><input id="demo" type="checkbox"> demo data (fake prices)</label>
+      <div><label for="src">Price data</label><select id="src"><option value="live">Live (Yahoo/Stooq)</option><option value="file">My CSV files</option><option value="demo">Demo (fake prices)</option></select></div>
+      <div id="filehint" class="mute small" hidden></div>
     </div>
   </div>
 
@@ -37,7 +38,7 @@
 
   <div class="card">
     <h2>Forward scoreboard</h2>
-    <p class="mute mb8">Every real (non-demo) read is saved. After the look-ahead period passes, it is checked against what the price did. This is the only test that cannot be fooled by old data.</p>
+    <p class="mute mb8">Every live read is saved (file and demo reads never are). After the look-ahead period passes, it is checked against what the price did. This is the only test that cannot be fooled by old data.</p>
     <div id="sb">Loading...</div>
     <p class="mt8"><a href="/api/scoreboard.csv" download>Download all reads as CSV</a></p>
   </div>

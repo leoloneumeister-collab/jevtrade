@@ -129,6 +129,16 @@ def cmd_scan(a, cfg: Config) -> None:
         sys.exit(1)
 
 
+def cmd_import_csv(a, cfg: Config) -> None:
+    from .market_data import import_csv
+
+    try:
+        out = import_csv(a.file, a.symbol)
+    except (ValueError, OSError) as e:
+        sys.exit(f"Could not import: {e}")
+    print(f"Saved {out}. In the web page choose Data: My CSV files, then ticker {a.symbol.upper()}.")
+
+
 def cmd_models(a, cfg: Config) -> None:
     from typesafe_sdk import TypeSafeClient
 
@@ -198,6 +208,10 @@ def main() -> None:
     sc.add_argument("--log", default="runs/predictions.jsonl")
     sc.add_argument("--demo", action="store_true")
     sc.set_defaults(fn=cmd_scan)
+    ic = sub.add_parser("import-csv", help="add a downloaded price CSV (Yahoo, Stooq, ...) to data/")
+    ic.add_argument("file")
+    ic.add_argument("--symbol", required=True)
+    ic.set_defaults(fn=cmd_import_csv)
     sub.add_parser("models").set_defaults(fn=cmd_models)
     sub.add_parser("check").set_defaults(fn=cmd_check)
     rp = sub.add_parser("report")

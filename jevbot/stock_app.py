@@ -23,7 +23,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .errors import friendly_error
-from .market_data import Bar, check_symbol, demo_bars, fetch_bars_cached
+from .market_data import (
+    Bar,
+    check_symbol,
+    demo_bars,
+    fetch_bars_cached,
+    file_symbols,
+    load_csv,
+    resolve_file,
+)
 from .stock_features import features, momentum_rule
 from .stock_jev import ask, lean
 
@@ -48,8 +56,27 @@ def stale_warning(last_bar: str, today: date | None = None) -> str | None:
     return None if age <= 4 else f"The latest price is {age} days old, so this read describes the past, not today."
 
 
-def get_bars(sym: str, demo: bool) -> tuple[list[Bar], str]:
-    return (demo_bars(sym), "demo") if demo else fetch_bars_cached(sym)
+VALID_SRC = ("live", "file", "demo")
+
+
+def norm_src(x) -> str:
+    """Data source: live prices, a CSV in data/, or fake demo prices. Booleans are the old demo flag."""
+    if x is True:
+        return "demo"
+    if x is False or x is None:
+        return "live"
+    if x in VALID_SRC:
+        return x
+    raise ValueError("'src' must be live, file or demo.")
+
+
+def get_bars(sym: str, src) -> tuple[list[Bar], str]:
+    src = norm_src(src)
+    if src == "demo":
+        return demo_bars(sym), "demo"
+    if src == "file":
+        return load_csv(resolve_file(sym)), "file"
+    return fetch_bars_cached(sym)
 
 
 def _fwd(bars: list[Bar], i: int, h: int) -> float | None:
@@ -89,8 +116,9 @@ def _log_read(log_path: str, out: dict, a: dict, label: str) -> bool:
     return True
 
 
-async def analyze(asker, sym: str, h: int, demo: bool, log_path: str | None) -> dict:
-    bars, source = await asyncio.to_thread(get_bars, sym, demo)  # network I/O off the event loop
+async def analyze(asker, sym: str, h: int, demo, log_path: str | None) -> dict:
+    src = norm_src(demo)
+    bars, source = await asyncio.to_thread(get_bars, sym, src)  # network I/O off the event loop
     snap = features(bars)
     a = await asker(snap, h)
     label, why = lean(a)
@@ -100,7 +128,8 @@ async def analyze(asker, sym: str, h: int, demo: bool, log_path: str | None) -> 
         "asof": bars[-1].d,
         "close": round(bars[-1].c, 2),
         "source": source,
-        "demo": demo,
+        "demo": src == "demo",
+        "src": src,
         "features": snap,
         "jev": a,
         "lean": label,
@@ -109,7 +138,7 @@ async def analyze(asker, sym: str, h: int, demo: bool, log_path: str | None) -> 
         "series": [[b.d, round(b.c, 2)] for b in bars[-130:]],
     }
     out["logged"] = False
-    if log_path and not demo:  # demo prices are fake, so they never enter the scoreboard
+    if log_path and src == "live":  # fake or historical-file prices never enter the forward scoreboard
         out["logged"] = _log_read(log_path, out, a, label)
     return out
 
@@ -213,11 +242,16 @@ def compare(jev: dict, rule: dict) -> str:
 
 
 async def backtest(
-    asker, sym: str, h: int, n: int, demo: bool, conc: int = 6, cost: float = ROUND_TRIP_COST_PCT
+    asker, sym: str, h: int, n: int, demo, conc: int = 6, cost: float = ROUND_TRIP_COST_PCT, skip: int = 0
 ) -> dict:
-    bars, source = await asyncio.to_thread(get_bars, sym, demo)
+    src = norm_src(demo)
+    bars, source = await asyncio.to_thread(get_bars, sym, src)
     n = max(10, min(n, 250))
-    idx = list(range(max(60, len(bars) - h - n), len(bars) - h))
+    skip = max(0, skip)
+    end = len(bars) - h - skip
+    if end - 60 < 10:
+        raise ValueError(f"Not enough history: {len(bars)} days cannot cover a test that skips the last {skip} days.")
+    idx = list(range(max(60, end - n), end))
     sem = asyncio.Semaphore(conc)
 
     async def one(i):
@@ -245,7 +279,9 @@ async def backtest(
         "symbol": sym,
         "h": h,
         "source": source,
-        "demo": demo,
+        "demo": src == "demo",
+        "src": src,
+        "skip": skip,
         "errors": len(res) - len(ok),
         "cost_pct": cost,
         "stats": jev,
@@ -259,7 +295,8 @@ async def backtest(
 MAX_WATCHLIST = 25
 
 
-async def scan(asker, symbols: list[str], h: int, demo: bool, log_path: str | None, conc: int = 4) -> dict:
+async def scan(asker, symbols: list[str], h: int, demo, log_path: str | None, conc: int = 4) -> dict:
+    src = norm_src(demo)
     """Ask Jev about many tickers. One bad ticker never sinks the rest. Capped to protect your credit."""
     syms = [s.strip() for s in symbols if s.strip()]
     truncated = len(syms) > MAX_WATCHLIST
@@ -269,7 +306,7 @@ async def scan(asker, symbols: list[str], h: int, demo: bool, log_path: str | No
     async def one(raw):
         async with sem:
             try:
-                d = await analyze(asker, check_symbol(raw), h, demo, log_path)
+                d = await analyze(asker, check_symbol(raw), h, src, log_path)
                 j = d["jev"]
                 return {
                     "symbol": d["symbol"],
@@ -287,7 +324,13 @@ async def scan(asker, symbols: list[str], h: int, demo: bool, log_path: str | No
 
     rows = await asyncio.gather(*(one(s) for s in syms))
     ok = sorted((r for r in rows if "error" not in r), key=lambda r: -r["p_up"])
-    return {"rows": ok + [r for r in rows if "error" in r], "truncated": truncated, "h": h, "demo": demo}
+    return {
+        "rows": ok + [r for r in rows if "error" in r],
+        "truncated": truncated,
+        "h": h,
+        "demo": src == "demo",
+        "src": src,
+    }
 
 
 def _resolve(preds: list[dict], demo: bool = False) -> list[dict]:
@@ -454,6 +497,8 @@ def make_handler(asker, model: str, log_path: str, has_key: bool, rate_limit: tu
                     return self._send(200, (STATIC / name).read_bytes(), ctype)
                 if u.path == "/favicon.ico":
                     return self._send(204, b"", "image/x-icon")
+                if u.path == "/api/files":
+                    return self._json({"symbols": file_symbols()})
                 if u.path == "/api/status":
                     return self._json({"has_key": has_key, "model": model})
                 if u.path == "/api/scoreboard.csv":
@@ -472,17 +517,25 @@ def make_handler(asker, model: str, log_path: str, has_key: bool, rate_limit: tu
                         )
                     if not limiter.allow():
                         return self._json({"error": "Too many requests. Wait a minute."}, 429)
-                    demo, h = q.get("demo") == "1", max(1, min(_num(q, "h", int, 5), 20))
+                    demo = norm_src(q.get("src") or ("demo" if q.get("demo") == "1" else "live"))
+                    h = max(1, min(_num(q, "h", int, 5), 20))
                     if u.path == "/api/analyze":
                         return self._json(
                             asyncio.run(analyze(asker, check_symbol(q.get("symbol", "")), h, demo, log_path))
                         )
                     if u.path == "/api/backtest":
                         cost = max(0.0, min(_num(q, "cost", float, ROUND_TRIP_COST_PCT), 5.0))
+                        skip = max(0, _num(q, "skip", int, 0))
                         return self._json(
                             asyncio.run(
                                 backtest(
-                                    asker, check_symbol(q.get("symbol", "")), h, _num(q, "n", int, 120), demo, cost=cost
+                                    asker,
+                                    check_symbol(q.get("symbol", "")),
+                                    h,
+                                    _num(q, "n", int, 120),
+                                    demo,
+                                    cost=cost,
+                                    skip=skip,
                                 )
                             )
                         )
