@@ -1,7 +1,6 @@
 """Step 8 tooling: calibration, direction accuracy and the fee check, from the journal alone."""
-from __future__ import annotations
 
-import math
+from __future__ import annotations
 
 from .journal import read
 
@@ -30,16 +29,26 @@ def calibration(rows: list[dict], horizon: int = 10, move_bps: float = 3.0, bins
             lo, hi = b / bins, (b + 1) / bins
             sel = [(p, y) for p, y in pairs if lo <= p < hi or (b == bins - 1 and p == 1.0)]
             if sel:
-                out.append({"bin": f"{lo:.1f}-{hi:.1f}", "n": len(sel),
-                            "predicted": round(sum(p for p, _ in sel) / len(sel), 3),
-                            "observed": round(sum(y for _, y in sel) / len(sel), 3)})
+                out.append(
+                    {
+                        "bin": f"{lo:.1f}-{hi:.1f}",
+                        "n": len(sel),
+                        "predicted": round(sum(p for p, _ in sel) / len(sel), 3),
+                        "observed": round(sum(y for _, y in sel) / len(sel), 3),
+                    }
+                )
         return out
 
     brier = sum((p - y) ** 2 for p, y in tox) / len(tox) if tox else None
     base = sum(y for _, y in tox) / len(tox) if tox else None
-    return {"toxic_reliability": curve(tox), "toxic_brier": brier,
-            "toxic_base_rate": base, "toxic_brier_baseline": base * (1 - base) if base is not None else None,
-            "direction_reliability": curve(dirs), "n_judged": len(tox)}
+    return {
+        "toxic_reliability": curve(tox),
+        "toxic_brier": brier,
+        "toxic_base_rate": base,
+        "toxic_brier_baseline": base * (1 - base) if base is not None else None,
+        "direction_reliability": curve(dirs),
+        "n_judged": len(tox),
+    }
 
 
 def fee_check(summary: dict) -> str:
@@ -65,7 +74,10 @@ def print_report(path: str) -> None:
     print(f"\ntoxic_flow reliability (n={cal['n_judged']}, base rate {cal['toxic_base_rate']:.3f}):")
     for b in cal["toxic_reliability"]:
         print(f"  {b['bin']}  n={b['n']:<6} said {b['predicted']:.2f}  happened {b['observed']:.2f}")
-    print(f"  brier {cal['toxic_brier']:.4f} vs constant-guess {cal['toxic_brier_baseline']:.4f} (lower than baseline = useful)")
+    print(
+        f"  brier {cal['toxic_brier']:.4f} vs constant-guess {cal['toxic_brier_baseline']:.4f} "
+        "(lower than baseline = useful)"
+    )
     print("\ndirection hit-rate by confidence:")
     for b in cal["direction_reliability"]:
         print(f"  {b['bin']}  n={b['n']:<6} said {b['predicted']:.2f}  right {b['observed']:.2f}")

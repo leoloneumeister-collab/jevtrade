@@ -1,4 +1,5 @@
 """Policy engine: turns Jev's judgments into an action. Pure code, thresholds from config."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,11 +10,11 @@ from .jev import Decision
 
 @dataclass(frozen=True)
 class Action:
-    kind: str                 # QUOTE_BOTH | QUOTE_WIDE | WIDEN | PULL_QUOTES | STAND_DOWN | HOLD | KILL
+    kind: str  # QUOTE_BOTH | QUOTE_WIDE | WIDEN | PULL_QUOTES | STAND_DOWN | HOLD | KILL
     size_mult: float = 1.0
     spread_mult: float = 1.0
-    pressure: int = 0         # 0..3 inventory pressure level
-    tilt_bps: float = 0.0     # directional reservation shift
+    pressure: int = 0  # 0..3 inventory pressure level
+    tilt_bps: float = 0.0  # directional reservation shift
     reason: str = ""
 
     @property
@@ -29,8 +30,9 @@ def compose_action(d: Decision, p: PolicyCfg) -> Action:
     if d.toxic > p.toxic_pull:
         return Action("PULL_QUOTES", reason=f"toxic {d.toxic:.2f}")
     if d.stressed > p.stress_widen:
-        return Action("WIDEN", size_mult=0.5, spread_mult=p.widen_mult, pressure=pressure,
-                      reason=f"stressed {d.stressed:.2f}")
+        return Action(
+            "WIDEN", size_mult=0.5, spread_mult=p.widen_mult, pressure=pressure, reason=f"stressed {d.stressed:.2f}"
+        )
 
     tilt = 0.0
     if d.direction_conf >= p.direction_min_conf and d.direction != "neutral":
@@ -40,8 +42,14 @@ def compose_action(d: Decision, p: PolicyCfg) -> Action:
         return Action("QUOTE_BOTH", pressure=pressure, tilt_bps=tilt)
     if d.quote_score >= p.wide_min_score:
         size = 0.5 if d.quote_conf < p.low_conf else 1.0
-        return Action("QUOTE_WIDE", size_mult=size, spread_mult=p.wide_mult, pressure=pressure,
-                      tilt_bps=tilt, reason="not confident enough for tight quotes")
+        return Action(
+            "QUOTE_WIDE",
+            size_mult=size,
+            spread_mult=p.wide_mult,
+            pressure=pressure,
+            tilt_bps=tilt,
+            reason="not confident enough for tight quotes",
+        )
     return Action("STAND_DOWN", reason="quote environment poor")
 
 
@@ -51,6 +59,5 @@ def rules_only(snap: dict, p: PolicyCfg) -> Action:
     balanced = abs(snap["aggressive_buy_ratio"] - 0.5) < p.rules_flow_band
     pressure = min(3, int(abs(snap["inventory"]) // p.rules_pressure_step))
     if calm and balanced:
-        return Action("QUOTE_WIDE", size_mult=0.5, spread_mult=p.wide_mult, pressure=pressure,
-                      reason="rules-only")
+        return Action("QUOTE_WIDE", size_mult=0.5, spread_mult=p.wide_mult, pressure=pressure, reason="rules-only")
     return Action("STAND_DOWN", reason="rules-only: not calm and balanced")

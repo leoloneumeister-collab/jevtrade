@@ -1,4 +1,5 @@
 """Quote math (Avellaneda-Stoikov style). Jev decides whether to quote, never where."""
+
 from __future__ import annotations
 
 import math
@@ -19,8 +20,8 @@ def make_quotes(snap: dict, action: Action, best_bid: float, best_ask: float, c:
     if not action.quoting:
         return []
     mid, inv = snap["mid"], snap["inventory"]
-    sigma = snap["vol_5m_bps"] * 1e-4 * mid                   # price units per block
-    reservation = mid - inv * c.gamma * sigma ** 2 * c.horizon_blocks
+    sigma = snap["vol_5m_bps"] * 1e-4 * mid  # price units per block
+    reservation = mid - inv * c.gamma * sigma**2 * c.horizon_blocks
     sign = (inv > 0) - (inv < 0)
     reservation -= sign * action.pressure * c.skew_bps * 1e-4 * mid
     reservation += action.tilt_bps * 1e-4 * mid

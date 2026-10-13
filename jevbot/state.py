@@ -1,4 +1,5 @@
 """State engine: pure arithmetic. Everything here is a function of data known at decision time."""
+
 from __future__ import annotations
 
 import json
@@ -69,7 +70,7 @@ class StateEngine:
         self.flow.append((buys, sells, len(tick.trades)))
         wb = sum(f[0] for f in self.flow)
         ws = sum(f[1] for f in self.flow)
-        recent = list(self.rets)[-self.vol_window:]
+        recent = list(self.rets)[-self.vol_window :]
         vol5 = math.sqrt(sum(x * x for x in recent) / len(recent)) * 1e4 if recent else 0.0
         long_vol = math.sqrt(self.long_var) * 1e4 if self.long_var else 0.0
 

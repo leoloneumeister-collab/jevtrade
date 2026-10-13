@@ -1,4 +1,5 @@
 """Phase 3: reliability. Written before the implementation."""
+
 import asyncio
 import threading
 import urllib.error
@@ -25,13 +26,16 @@ def test_retry_backs_off_then_succeeds():
         if len(calls) < 3:
             raise urllib.error.URLError("temporary")
         return "ok"
+
     assert md.with_retry(flaky, tries=3, base=0.5, sleep=sleeps.append) == "ok"
     assert sleeps == [0.5, 1.0]
 
 
 def test_retry_gives_up_and_raises_last_error():
     with pytest.raises(urllib.error.URLError):
-        md.with_retry(lambda: (_ for _ in ()).throw(urllib.error.URLError("down")), tries=3, base=0, sleep=lambda s: None)
+        md.with_retry(
+            lambda: (_ for _ in ()).throw(urllib.error.URLError("down")), tries=3, base=0, sleep=lambda s: None
+        )
 
 
 @pytest.mark.parametrize("err", [http(404), http(403), ValueError("bad"), KeyError("x")])
@@ -41,6 +45,7 @@ def test_retry_does_not_repeat_permanent_errors(err):
     def f():
         n.append(1)
         raise err
+
     with pytest.raises(type(err)):
         md.with_retry(f, tries=3, base=0, sleep=lambda s: None)
     assert len(n) == 1
@@ -53,6 +58,7 @@ def test_retry_repeats_rate_limit_and_server_errors(code):
     def f():
         n.append(1)
         raise http(code)
+
     with pytest.raises(urllib.error.HTTPError):
         md.with_retry(f, tries=3, base=0, sleep=lambda s: None)
     assert len(n) == 3
@@ -64,6 +70,7 @@ def test_falls_back_to_second_source(monkeypatch):
 
     def boom(sym):
         raise urllib.error.URLError("yahoo down")
+
     monkeypatch.setattr(md, "_yahoo", boom)
     monkeypatch.setattr(md, "_stooq", lambda sym: good)
     monkeypatch.setattr(md, "_sleep", lambda s: None)
@@ -117,6 +124,7 @@ def test_cache_hits_expiry_and_no_caching_of_failures(monkeypatch):
         if sym == "BAD":
             raise RuntimeError("fail")
         return demo_bars(sym), "test"
+
     monkeypatch.setattr(md, "fetch_bars", fake)
     md.fetch_bars_cached("AAA", ttl=900)
     md.fetch_bars_cached("AAA", ttl=900)
@@ -144,7 +152,7 @@ def test_cache_is_safe_under_threads(monkeypatch):
 
 # ---- stale data -----------------------------------------------------------
 def test_stale_warning():
-    assert stock_app.stale_warning("2026-10-09", today=date(2026, 10, 12)) is None            # Friday close, Monday morning
+    assert stock_app.stale_warning("2026-10-09", today=date(2026, 10, 12)) is None  # Friday close, Monday morning
     assert stock_app.stale_warning("2026-10-02", today=date(2026, 10, 12)) is not None
     assert "10 days" in stock_app.stale_warning("2026-10-02", today=date(2026, 10, 12))
 
@@ -155,8 +163,22 @@ def test_analyze_surfaces_stale_warning(monkeypatch):
     monkeypatch.setattr(stock_app, "_today", lambda: date.fromisoformat(bars[-1].d).replace(year=2099))
 
     async def asker(snap, h):
-        return dict(direction="up", direction_conf=.7, p_up=.7, p_down=.1, p_flat=.2, uptrend=.6, overextended=.2,
-                    vol_regime="normal", vol_conf=.7, entry_score=2.5, entry_conf=.7, model="m", latency_ms=1)
+        return {
+            "direction": "up",
+            "direction_conf": 0.7,
+            "p_up": 0.7,
+            "p_down": 0.1,
+            "p_flat": 0.2,
+            "uptrend": 0.6,
+            "overextended": 0.2,
+            "vol_regime": "normal",
+            "vol_conf": 0.7,
+            "entry_score": 2.5,
+            "entry_conf": 0.7,
+            "model": "m",
+            "latency_ms": 1,
+        }
+
     d = asyncio.run(stock_app.analyze(asker, "AAPL", 5, False, None))
     assert d["warning"] and "old" in d["warning"]
 

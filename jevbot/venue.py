@@ -3,6 +3,7 @@
 The ledger here is the source of truth for the risk engine, so limits never depend on
 anything the model or the policy says.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ class VenueError(Exception):
 @dataclass
 class Order:
     oid: int
-    side: str   # "buy" | "sell"
+    side: str  # "buy" | "sell"
     px: float
     size: float
     block: int
@@ -36,7 +37,7 @@ class Fill:
 class PaperVenue:
     def __init__(self, cfg: PaperCfg):
         self.cfg = cfg
-        self.cash = cfg.capital          # equity = capital + pnl; leverage is measured against it
+        self.cash = cfg.capital  # equity = capital + pnl; leverage is measured against it
         self.inv = 0.0
         self.avg_entry = 0.0
         self.fees = 0.0
@@ -52,7 +53,7 @@ class PaperVenue:
         self.slip_bps_sum = 0.0
         self.inv_since: float | None = None
         self._fail = 0
-        self.calls = 0              # successful place/cancel calls
+        self.calls = 0  # successful place/cancel calls
 
     # ---- ledger views -------------------------------------------------
     @property
@@ -95,7 +96,7 @@ class PaperVenue:
         self.fees += self.cfg.order_cost
         best_bid, best_ask = tick.bids[0][0], tick.asks[0][0]
         crosses = (side == "buy" and px >= best_ask) or (side == "sell" and px <= best_bid)
-        if crosses or size <= 0:       # post-only: reject instead of taking
+        if crosses or size <= 0:  # post-only: reject instead of taking
             self.rejects += 1
             return None
         self._oid += 1
@@ -122,8 +123,9 @@ class PaperVenue:
             for o in sorted(self.orders.values(), key=lambda o: o.oid):
                 if avail <= 0:
                     break
-                hit = (side == "sell" and o.side == "buy" and o.px >= t_px) or \
-                      (side == "buy" and o.side == "sell" and o.px <= t_px)
+                hit = (side == "sell" and o.side == "buy" and o.px >= t_px) or (
+                    side == "buy" and o.side == "sell" and o.px <= t_px
+                )
                 if not hit or o.block >= tick.block:
                     continue
                 q = min(o.size, avail)

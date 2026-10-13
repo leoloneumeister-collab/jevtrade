@@ -3,36 +3,38 @@
 Runs on 127.0.0.1 only. The API key is read from the environment by the server and never reaches the browser.
 Paper only. This app cannot place orders.
 """
+
 from __future__ import annotations
 
 import asyncio
 import csv
 import io
 import json
+import logging
 import math
 import os
 import re
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from datetime import date
-
 from .errors import friendly_error
 from .market_data import Bar, check_symbol, demo_bars, fetch_bars_cached
 from .stock_features import features, momentum_rule
-from .stock_jev import StockPolicy, ask, lean
+from .stock_jev import ask, lean
 
+log = logging.getLogger("jevbot.stock")
 STATIC = Path(__file__).parent / "static"
-ROUND_TRIP_COST_PCT = 0.10          # assumed cost per paper trade, in percent
+ROUND_TRIP_COST_PCT = 0.10  # assumed cost per paper trade, in percent
 
 
 def _client(model: str):
     from typesafe_sdk import AsyncTypeSafeClient, RetryPolicy
+
     return AsyncTypeSafeClient(model=model, retry=RetryPolicy(max_retries=1), timeout=10)
 
 
@@ -67,44 +69,75 @@ def _log_read(log_path: str, out: dict, a: dict, label: str) -> bool:
         return False
     Path(log_path).parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "a") as f:
-        f.write(json.dumps({"id": uuid.uuid4().hex[:8], "symbol": out["symbol"], "asof": out["asof"], "close": out["close"],
-                            "h": out["h"], "lean": label, "p_up": a["p_up"], "p_down": a["p_down"], "model": a["model"],
-                            "made_at": datetime.now(timezone.utc).isoformat()}) + "\n")
+        f.write(
+            json.dumps(
+                {
+                    "id": uuid.uuid4().hex[:8],
+                    "symbol": out["symbol"],
+                    "asof": out["asof"],
+                    "close": out["close"],
+                    "h": out["h"],
+                    "lean": label,
+                    "p_up": a["p_up"],
+                    "p_down": a["p_down"],
+                    "model": a["model"],
+                    "made_at": datetime.now(UTC).isoformat(),
+                }
+            )
+            + "\n"
+        )
     return True
 
 
 async def analyze(asker, sym: str, h: int, demo: bool, log_path: str | None) -> dict:
-    bars, source = await asyncio.to_thread(get_bars, sym, demo)   # network I/O off the event loop
+    bars, source = await asyncio.to_thread(get_bars, sym, demo)  # network I/O off the event loop
     snap = features(bars)
     a = await asker(snap, h)
     label, why = lean(a)
-    out = {"symbol": sym, "h": h, "asof": bars[-1].d, "close": round(bars[-1].c, 2), "source": source,
-           "demo": demo, "features": snap, "jev": a, "lean": label, "why": why,
-           "warning": stale_warning(bars[-1].d) if not demo else None,
-           "series": [[b.d, round(b.c, 2)] for b in bars[-130:]]}
+    out = {
+        "symbol": sym,
+        "h": h,
+        "asof": bars[-1].d,
+        "close": round(bars[-1].c, 2),
+        "source": source,
+        "demo": demo,
+        "features": snap,
+        "jev": a,
+        "lean": label,
+        "why": why,
+        "warning": stale_warning(bars[-1].d) if not demo else None,
+        "series": [[b.d, round(b.c, 2)] for b in bars[-130:]],
+    }
     out["logged"] = False
-    if log_path and not demo:       # demo prices are fake, so they never enter the scoreboard
+    if log_path and not demo:  # demo prices are fake, so they never enter the scoreboard
         out["logged"] = _log_read(log_path, out, a, label)
     return out
 
 
 def _bins(pairs: list[tuple[float, int]], edges=(0.0, 0.4, 0.5, 0.6, 0.7, 1.0001)) -> list[dict]:
     out = []
-    for lo, hi in zip(edges, edges[1:]):
+    for lo, hi in zip(edges, edges[1:], strict=False):
         sel = [y for p, y in pairs if lo <= p < hi]
         if sel:
-            out.append({"range": f"{lo:.1f}-{min(hi, 1.0):.1f}", "n": len(sel), "said_up": round((lo + min(hi, 1.0)) / 2, 2),
-                        "was_up": round(sum(sel) / len(sel), 3)})
+            out.append(
+                {
+                    "range": f"{lo:.1f}-{min(hi, 1.0):.1f}",
+                    "n": len(sel),
+                    "said_up": round((lo + min(hi, 1.0)) / 2, 2),
+                    "was_up": round(sum(sel) / len(sel), 3),
+                }
+            )
     return out
 
 
-MIN_INDEPENDENT = 10        # fewer independent signals than this and we refuse to call anything
+MIN_INDEPENDENT = 10  # fewer independent signals than this and we refuse to call anything
 
 
 def non_overlapping(rows: list[dict], h: int, key: str = "lean", target: str = "LEAN UP") -> list[dict]:
     """Signals closer than h days share most of their outcome window, so they are not independent evidence.
     Greedy pick of signals at least h days apart, with a separate clock per symbol."""
-    picked, last = [], {}
+    picked: list[dict] = []
+    last: dict[str, int] = {}
     for r in sorted(rows, key=lambda r: (r.get("symbol", ""), r["i"])):
         sym = r.get("symbol", "")
         if r[key] == target and (sym not in last or r["i"] - last[sym] >= h):
@@ -122,31 +155,44 @@ def summarize(rows: list[dict], h: int = 5, cost: float = ROUND_TRIP_COST_PCT, k
     longs = [r for r in rows if r[key] == "LEAN UP"]
     ind = non_overlapping(rows, h, key)
     downs = [r for r in rows if r[key] == "LEAN DOWN"]
-    hit = sum(r["fwd"] > 0 for r in ind) / len(ind) if ind else None
-    z = (hit - base) / math.sqrt(base * (1 - base) / len(ind)) if ind and 0 < base < 1 else None
-    avg_ind = sum(r["fwd"] for r in ind) / len(ind) if ind else None
+    hit: float | None = None
+    z: float | None = None
+    avg_ind: float | None = None
+    if ind:
+        hit = sum(r["fwd"] > 0 for r in ind) / len(ind)
+        avg_ind = sum(r["fwd"] for r in ind) / len(ind)
+        if 0 < base < 1:
+            z = (hit - base) / math.sqrt(base * (1 - base) / len(ind))
     return {
-        "days": n, "baseline_up_rate": round(base, 3),
+        "days": n,
+        "baseline_up_rate": round(base, 3),
         "avg_return_all_days_pct": round(sum(r["fwd"] for r in rows) / n, 3) if n else 0.0,
-        "long_signals": len(longs), "independent_long": len(ind),
+        "long_signals": len(longs),
+        "independent_long": len(ind),
         "long_hit_rate": None if hit is None else round(hit, 3),
         "avg_return_after_long_pct": None if avg_ind is None else round(avg_ind, 3),
         "avg_return_after_long_net_pct": None if avg_ind is None else round(avg_ind - cost, 3),
         "down_signals": len(downs),
         "avg_return_after_down_pct": round(sum(r["fwd"] for r in downs) / len(downs), 3) if downs else None,
-        "sat_out": n - len(longs) - len(downs), "z_vs_baseline": None if z is None else round(z, 2),
-        "cost_pct": cost, "calibration": _bins([(r["p_up"], int(r["fwd"] > 0)) for r in rows]),
+        "sat_out": n - len(longs) - len(downs),
+        "z_vs_baseline": None if z is None else round(z, 2),
+        "cost_pct": cost,
+        "calibration": _bins([(r["p_up"], int(r["fwd"] > 0)) for r in rows]),
         "verdict": _verdict(len(ind), avg_ind, cost, z),
     }
 
 
 def _verdict(n_ind: int, avg_ind: float | None, cost: float, z: float | None) -> str:
     if n_ind < MIN_INDEPENDENT:
-        return (f"Too few independent signals ({n_ind}, need {MIN_INDEPENDENT}) to say anything. "
-                "Sitting out most days is not a failure.")
+        return (
+            f"Too few independent signals ({n_ind}, need {MIN_INDEPENDENT}) to say anything. "
+            "Sitting out most days is not a failure."
+        )
     if z is not None and z >= 2 and avg_ind is not None and avg_ind - cost > 0:
-        return ("Promising, not proof. Signals beat the baseline and survive costs. But the sample is small and Jev may "
-                "have seen this period in training. Only the forward scoreboard counts.")
+        return (
+            "Promising, not proof. Signals beat the baseline and survive costs. But the sample is small and Jev may "
+            "have seen this period in training. Only the forward scoreboard counts."
+        )
     return "No demonstrated edge here. Signals do not clearly beat simply holding, or do not survive costs."
 
 
@@ -159,11 +205,16 @@ def compare(jev: dict, rule: dict) -> str:
     if jn <= jev["avg_return_all_days_pct"]:
         return "Jev's signals did not beat simply holding the stock on every day, even before comparing with the rule."
     if jn > rn and (jev["long_hit_rate"] or 0) > (rule["long_hit_rate"] or 0):
-        return "Jev beat the simple momentum rule on this sample. Check that it holds on other tickers before believing it."
+        return (
+            "Jev beat the simple momentum rule on this sample. "
+            "Check that it holds on other tickers before believing it."
+        )
     return "Jev did not beat the simple momentum rule. If a 3-line rule does as well, Jev adds nothing here."
 
 
-async def backtest(asker, sym: str, h: int, n: int, demo: bool, conc: int = 6, cost: float = ROUND_TRIP_COST_PCT) -> dict:
+async def backtest(
+    asker, sym: str, h: int, n: int, demo: bool, conc: int = 6, cost: float = ROUND_TRIP_COST_PCT
+) -> dict:
     bars, source = await asyncio.to_thread(get_bars, sym, demo)
     n = max(10, min(n, 250))
     idx = list(range(max(60, len(bars) - h - n), len(bars) - h))
@@ -172,20 +223,37 @@ async def backtest(asker, sym: str, h: int, n: int, demo: bool, conc: int = 6, c
     async def one(i):
         async with sem:
             try:
-                snap = features(bars[: i + 1])                    # data up to day i only
+                snap = features(bars[: i + 1])  # data up to day i only
                 a = await asker(snap, h)
             except Exception as e:
                 return {"error": repr(e)}
             lab, _ = lean(a)
-            return {"i": i, "asof": bars[i].d, "lean": lab, "rule_lean": momentum_rule(snap), "p_up": a["p_up"],
-                    "fwd": _fwd(bars, i, h), "model": a["model"]}
+            return {
+                "i": i,
+                "asof": bars[i].d,
+                "lean": lab,
+                "rule_lean": momentum_rule(snap),
+                "p_up": a["p_up"],
+                "fwd": _fwd(bars, i, h),
+                "model": a["model"],
+            }
 
     res = await asyncio.gather(*(one(i) for i in idx))
     ok = [r for r in res if "error" not in r]
     jev, rule = summarize(ok, h, cost), summarize(ok, h, cost, key="rule_lean")
-    return {"symbol": sym, "h": h, "source": source, "demo": demo, "errors": len(res) - len(ok), "cost_pct": cost,
-            "stats": jev, "rule_stats": rule, "comparison": compare(jev, rule), "rows": ok[-40:],
-            "caveat": "Jev may have seen this price history during training, so this test can look better than reality."}
+    return {
+        "symbol": sym,
+        "h": h,
+        "source": source,
+        "demo": demo,
+        "errors": len(res) - len(ok),
+        "cost_pct": cost,
+        "stats": jev,
+        "rule_stats": rule,
+        "comparison": compare(jev, rule),
+        "rows": ok[-40:],
+        "caveat": "Jev may have seen this price history during training, so this test can look better than reality.",
+    }
 
 
 MAX_WATCHLIST = 25
@@ -203,9 +271,17 @@ async def scan(asker, symbols: list[str], h: int, demo: bool, log_path: str | No
             try:
                 d = await analyze(asker, check_symbol(raw), h, demo, log_path)
                 j = d["jev"]
-                return {"symbol": d["symbol"], "lean": d["lean"], "p_up": j["p_up"], "p_down": j["p_down"],
-                        "entry_score": j["entry_score"], "vol_regime": j["vol_regime"], "close": d["close"],
-                        "asof": d["asof"], "warning": d.get("warning")}
+                return {
+                    "symbol": d["symbol"],
+                    "lean": d["lean"],
+                    "p_up": j["p_up"],
+                    "p_down": j["p_down"],
+                    "entry_score": j["entry_score"],
+                    "vol_regime": j["vol_regime"],
+                    "close": d["close"],
+                    "asof": d["asof"],
+                    "warning": d.get("warning"),
+                }
             except Exception as e:
                 return {"symbol": re.sub(r"[^A-Z0-9.\-]", "?", raw.upper())[:12], "error": friendly_error(e)}
 
@@ -224,8 +300,8 @@ def _resolve(preds: list[dict], demo: bool = False) -> list[dict]:
             bars = cache.setdefault(q["symbol"], get_bars(q["symbol"], demo)[0])
             idx = next(k for k, b in enumerate(bars) if b.d == q["asof"])
             fwd = _fwd(bars, idx, q["h"])
-        except Exception:
-            pass
+        except Exception as e:  # an unresolvable prediction stays pending; say why in the log, not on the page
+            log.debug("could not resolve %s %s: %r", q.get("symbol"), q.get("asof"), e)
         out.append({**q, "fwd": fwd, "i": idx})
     return out
 
@@ -235,11 +311,28 @@ def scoreboard(log_path: str, demo: bool = False) -> dict:
     res = _resolve(preds, demo)
     done = [r for r in res if r["fwd"] is not None]
     horizon = max((r["h"] for r in done), default=5)
-    return {"made": len(preds), "pending": len(res) - len(done),
-            "stats": summarize(done, horizon) if done else None, "recent": done[-15:]}
+    return {
+        "made": len(preds),
+        "pending": len(res) - len(done),
+        "stats": summarize(done, horizon) if done else None,
+        "recent": done[-15:],
+    }
 
 
-CSV_COLUMNS = ["made_at", "symbol", "asof", "h", "lean", "p_up", "p_down", "close", "model", "status", "fwd_pct", "correct"]
+CSV_COLUMNS = [
+    "made_at",
+    "symbol",
+    "asof",
+    "h",
+    "lean",
+    "p_up",
+    "p_down",
+    "close",
+    "model",
+    "status",
+    "fwd_pct",
+    "correct",
+]
 
 
 def scoreboard_csv(log_path: str, demo: bool = False) -> str:
@@ -251,8 +344,14 @@ def scoreboard_csv(log_path: str, demo: bool = False) -> str:
         verdict = ""
         if done and r["lean"] in ("LEAN UP", "LEAN DOWN"):
             verdict = "yes" if (r["fwd"] > 0) == (r["lean"] == "LEAN UP") else "no"
-        w.writerow({**r, "status": "resolved" if done else "pending",
-                    "fwd_pct": "" if not done else round(r["fwd"], 3), "correct": verdict})
+        w.writerow(
+            {
+                **r,
+                "status": "resolved" if done else "pending",
+                "fwd_pct": "" if not done else round(r["fwd"], 3),
+                "correct": verdict,
+            }
+        )
     return buf.getvalue()
 
 
@@ -275,12 +374,17 @@ class RateLimiter:
             return True
 
 
-EXPENSIVE = ("/api/analyze", "/api/backtest", "/api/scan")          # these spend Jev credit
-PUBLIC_FILES = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-                "/app.css": ("app.css", "text/css; charset=utf-8")}
+EXPENSIVE = ("/api/analyze", "/api/backtest", "/api/scan")  # these spend Jev credit
+PUBLIC_FILES = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/app.css": ("app.css", "text/css; charset=utf-8"),
+}
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
-    "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
     "Cache-Control": "no-store",
 }
 MAX_QUERY_VALUE = 400
@@ -306,7 +410,7 @@ def make_handler(asker, model: str, log_path: str, has_key: bool, rate_limit: tu
             self._send(code, json.dumps(obj).encode(), "application/json")
 
         def _allowed_hosts(self) -> set[str]:
-            port = self.server.server_address[1]
+            port = int(self.server.server_address[1])  # type: ignore[index]
             return {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
 
         def _guard(self, path: str) -> bool:
@@ -339,22 +443,35 @@ def make_handler(asker, model: str, log_path: str, has_key: bool, rate_limit: tu
                 if u.path == "/api/status":
                     return self._json({"has_key": has_key, "model": model})
                 if u.path == "/api/scoreboard.csv":
-                    return self._send(200, scoreboard_csv(log_path, q.get("demo") == "1").encode(), "text/csv; charset=utf-8",
-                                      {"Content-Disposition": 'attachment; filename="jev_scoreboard.csv"'})
+                    return self._send(
+                        200,
+                        scoreboard_csv(log_path, q.get("demo") == "1").encode(),
+                        "text/csv; charset=utf-8",
+                        {"Content-Disposition": 'attachment; filename="jev_scoreboard.csv"'},
+                    )
                 if u.path == "/api/scoreboard":
                     return self._json(scoreboard(log_path, q.get("demo") == "1"))
                 if u.path in EXPENSIVE:
                     if not has_key:
-                        return self._json({"error": "TYPESAFE_API_KEY is not set on the machine running this app."}, 400)
+                        return self._json(
+                            {"error": "TYPESAFE_API_KEY is not set on the machine running this app."}, 400
+                        )
                     if not limiter.allow():
                         return self._json({"error": "Too many requests. Wait a minute."}, 429)
                     demo, h = q.get("demo") == "1", max(1, min(int(q.get("h", 5)), 20))
                     if u.path == "/api/analyze":
-                        return self._json(asyncio.run(analyze(asker, check_symbol(q.get("symbol", "")), h, demo, log_path)))
+                        return self._json(
+                            asyncio.run(analyze(asker, check_symbol(q.get("symbol", "")), h, demo, log_path))
+                        )
                     if u.path == "/api/backtest":
                         cost = max(0.0, min(float(q.get("cost", ROUND_TRIP_COST_PCT)), 5.0))
-                        return self._json(asyncio.run(backtest(asker, check_symbol(q.get("symbol", "")), h,
-                                                               int(q.get("n", 120)), demo, cost=cost)))
+                        return self._json(
+                            asyncio.run(
+                                backtest(
+                                    asker, check_symbol(q.get("symbol", "")), h, int(q.get("n", 120)), demo, cost=cost
+                                )
+                            )
+                        )
                     return self._json(asyncio.run(scan(asker, q.get("symbols", "").split(","), h, demo, log_path)))
                 self._send(404, b"not found", "text/plain")
             except ValueError as e:
@@ -369,7 +486,16 @@ def make_asker(model: str):
     async def asker(snap, h):
         # one client per event loop: asyncio.run() makes a fresh loop per request
         return await ask(_client(model), model, snap, h)
+
     return asker
+
+
+DEFAULT_MODEL = "jev-1.13.0"  # keep equal to config.toml [jev].model (a test enforces it)
+
+
+def resolve_model(model: str) -> str:
+    """Never run on a floating alias: a silent model upgrade invalidates every threshold you tuned."""
+    return model if model not in ("", "jev-latest") else DEFAULT_MODEL
 
 
 DEFAULT_WATCHLIST = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,JPM,XOM,JNJ,WMT"
@@ -377,11 +503,12 @@ DEFAULT_WATCHLIST = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,JPM,XOM,JNJ,WMT"
 
 def serve(model: str, port: int = 8000, log_path: str = "runs/predictions.jsonl", open_browser: bool = True) -> None:
     import webbrowser
-    model = model if model not in ("", "jev-latest") else DEFAULT_MODEL
+
+    model = resolve_model(model)
     key = bool(os.environ.get("TYPESAFE_API_KEY"))
 
     handler, srv = make_handler(make_asker(model), model, log_path, key), None
-    for p in range(port, port + 11):                      # port busy? try the next ones
+    for p in range(port, port + 11):  # port busy? try the next ones
         try:
             srv = ThreadingHTTPServer(("127.0.0.1", p), handler)
             break
@@ -394,7 +521,7 @@ def serve(model: str, port: int = 8000, log_path: str = "runs/predictions.jsonl"
     print(f"Model {model} | API key {'found' if key else 'NOT SET (set TYPESAFE_API_KEY, then restart)'}")
     print("Keep this window open while you use it. Press Ctrl+C to stop.\n")
     if open_browser:
-        webbrowser.open(url)                              # server is already listening, so no race
+        webbrowser.open(url)  # server is already listening, so no race
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

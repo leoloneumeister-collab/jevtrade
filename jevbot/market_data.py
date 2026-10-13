@@ -2,6 +2,7 @@
 
 Both sources are free and unofficial/keyless: they can change or rate-limit without notice.
 """
+
 from __future__ import annotations
 
 import csv
@@ -16,14 +17,14 @@ import urllib.error
 import urllib.request
 import zlib
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 SYMBOL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9.\-]{0,9}$")
 
 
 @dataclass(frozen=True)
 class Bar:
-    d: str          # YYYY-MM-DD
+    d: str  # YYYY-MM-DD
     o: float
     h: float
     l: float
@@ -39,8 +40,10 @@ def check_symbol(sym: str) -> str:
 
 
 def _get(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 jevbot-prototype"})
-    with urllib.request.urlopen(req, timeout=15) as r:
+    if not url.startswith("https://"):  # only ever fetch over TLS, never file: or custom schemes
+        raise ValueError("refusing to fetch a non-https URL")
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 jevbot-prototype"})  # noqa: S310
+    with urllib.request.urlopen(req, timeout=15) as r:  # noqa: S310  (https-only, checked above)
         return r.read()
 
 
@@ -48,20 +51,30 @@ def _yahoo(sym: str) -> list[Bar]:
     raw = json.loads(_get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=2y"))
     res = raw["chart"]["result"][0]
     q = res["indicators"]["quote"][0]
-    out = []
+    out: list[Bar] = []
     for i, ts in enumerate(res["timestamp"]):
         vals = [q[k][i] for k in ("open", "high", "low", "close", "volume")]
         if any(v is None for v in vals):
             continue
-        out.append(Bar(datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d"), *map(float, vals)))
+        out.append(Bar(datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%d"), *map(float, vals)))
     return out
 
 
 def _stooq(sym: str) -> list[Bar]:
     txt = _get(f"https://stooq.com/q/d/l/?s={sym.lower()}.us&i=d").decode()
     rows = list(csv.DictReader(io.StringIO(txt)))
-    return [Bar(r["Date"], float(r["Open"]), float(r["High"]), float(r["Low"]), float(r["Close"]),
-                float(r.get("Volume") or 0)) for r in rows if r.get("Close")][-520:]
+    return [
+        Bar(
+            r["Date"],
+            float(r["Open"]),
+            float(r["High"]),
+            float(r["Low"]),
+            float(r["Close"]),
+            float(r.get("Volume") or 0),
+        )
+        for r in rows
+        if r.get("Close")
+    ][-520:]
 
 
 _sleep = time.sleep
@@ -83,7 +96,7 @@ def with_retry(fn, tries: int = 3, base: float = 0.5, sleep=None):
         except Exception as e:
             if not _transient(e) or k == tries - 1:
                 raise
-            sleep(base * 2 ** k)
+            sleep(base * 2**k)
 
 
 def validate_bars(bars: list[Bar]) -> None:
@@ -103,7 +116,7 @@ def fetch_bars(sym: str) -> tuple[list[Bar], str]:
     errs = []
     for name, fn in (("yahoo", _yahoo), ("stooq", _stooq)):
         try:
-            bars = with_retry(lambda: fn(sym))
+            bars = with_retry(lambda fn=fn: fn(sym))
             validate_bars(bars)
             return bars, name
         except Exception as e:
@@ -113,7 +126,7 @@ def fetch_bars(sym: str) -> tuple[list[Bar], str]:
 
 _cache: dict[str, tuple[float, tuple[list[Bar], str]]] = {}
 _locks: dict[str, threading.Lock] = {}
-_lock = threading.Lock()                        # guards the two dicts only, never held during a fetch
+_lock = threading.Lock()  # guards the two dicts only, never held during a fetch
 
 
 def clear_cache() -> None:
@@ -141,7 +154,8 @@ def fetch_bars_cached(sym: str, ttl: float = 900.0) -> tuple[list[Bar], str]:
 def demo_bars(sym: str, n: int = 420) -> list[Bar]:
     """Synthetic but deterministic per ticker. For trying the UI only. Prices are NOT real."""
     rnd = random.Random(zlib.crc32(sym.encode()))
-    price, drift, out = 100 * (0.5 + rnd.random()), 0.0, []
+    price, drift = 100 * (0.5 + rnd.random()), 0.0
+    out: list[Bar] = []
     day = date.today() - timedelta(days=int(n * 1.45))
     while len(out) < n:
         day += timedelta(days=1)
@@ -152,6 +166,6 @@ def demo_bars(sym: str, n: int = 420) -> list[Bar]:
         r = drift + rnd.gauss(0, 0.014)
         o = price
         price *= math.exp(r)
-        hi, lo = max(o, price) * (1 + abs(rnd.gauss(0, .004))), min(o, price) * (1 - abs(rnd.gauss(0, .004)))
+        hi, lo = max(o, price) * (1 + abs(rnd.gauss(0, 0.004))), min(o, price) * (1 - abs(rnd.gauss(0, 0.004)))
         out.append(Bar(day.isoformat(), o, hi, lo, price, rnd.uniform(0.7, 1.4) * 5e6))
     return out

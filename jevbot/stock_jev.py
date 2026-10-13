@@ -1,4 +1,5 @@
 """Jev judges the stock's setup. Code turns the judgments into a cautious label. Nothing here trades."""
+
 from __future__ import annotations
 
 import time
@@ -7,26 +8,37 @@ from dataclasses import dataclass
 
 def build_questions(h: int):
     from typesafe_sdk import Choice, Noul, Score
+
     return {
         "direction": Choice(
             instructions=f"Most likely direction of the closing price over the next {h} trading days",
-            criteria={"up": "Closes meaningfully higher", "down": "Closes meaningfully lower",
-                      "flat": "Roughly unchanged, within normal noise"}),
+            criteria={
+                "up": "Closes meaningfully higher",
+                "down": "Closes meaningfully lower",
+                "flat": "Roughly unchanged, within normal noise",
+            },
+        ),
         "uptrend": Noul(instructions="The stock is in an established uptrend"),
         "overextended": Noul(instructions="Price is stretched far above its recent average and due for a pullback"),
         "vol_regime": Choice(
             instructions="How turbulent is this stock right now compared with its own history",
-            criteria={"calm": "Moves are smaller than usual", "normal": "Typical size of moves",
-                      "turbulent": "Moves are larger and less predictable than usual"}),
+            criteria={
+                "calm": "Moves are smaller than usual",
+                "normal": "Typical size of moves",
+                "turbulent": "Moves are larger and less predictable than usual",
+            },
+        ),
         "entry_quality": Score(
             instructions="How favorable is this setup for opening a position now",
-            criteria=["Poor", "Mixed", "Decent", "Strong"]),
+            criteria=["Poor", "Mixed", "Decent", "Strong"],
+        ),
     }
 
 
 @dataclass
 class StockPolicy:
     """Thresholds live here, not in a prompt. Deliberately strict: most days should say SIT OUT."""
+
     min_p_direction: float = 0.60
     min_entry_score: float = 2.0
     max_overextended: float = 0.70
@@ -36,12 +48,21 @@ def parse(resp, latency_ms: float) -> dict:
     d, v = resp.choices["direction"], resp.choices["vol_regime"]
     e = resp.scores["entry_quality"]
     p = {k: float(x) for k, x in d.probabilities.items()}
-    return {"direction": d.choice, "direction_conf": d.confidence, "p_up": p.get("up", 0.0),
-            "p_down": p.get("down", 0.0), "p_flat": p.get("flat", 0.0),
-            "uptrend": resp.nouls["uptrend"].noul, "overextended": resp.nouls["overextended"].noul,
-            "vol_regime": v.choice, "vol_conf": v.confidence,
-            "entry_score": e.score, "entry_conf": e.confidence,
-            "model": resp.model, "latency_ms": round(latency_ms)}
+    return {
+        "direction": d.choice,
+        "direction_conf": d.confidence,
+        "p_up": p.get("up", 0.0),
+        "p_down": p.get("down", 0.0),
+        "p_flat": p.get("flat", 0.0),
+        "uptrend": resp.nouls["uptrend"].noul,
+        "overextended": resp.nouls["overextended"].noul,
+        "vol_regime": v.choice,
+        "vol_conf": v.confidence,
+        "entry_score": e.score,
+        "entry_conf": e.confidence,
+        "model": resp.model,
+        "latency_ms": round(latency_ms),
+    }
 
 
 def lean(a: dict, pol: StockPolicy | None = None) -> tuple[str, str]:

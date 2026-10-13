@@ -8,6 +8,7 @@ They have NOT yet been checked against live traffic from this project. Run
 Design: one deterministic core (`StreamCore`) fed with raw messages and timestamps. The live
 feed and the replay feed share it, so a recorded session replays to identical ticks.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,8 +17,10 @@ import logging
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import AsyncIterator
+from datetime import UTC
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from .feed import Tick
 
@@ -52,7 +55,7 @@ class StreamCore:
         self.tick_size: float | None = None
         self.min_order_size: float | None = None
         self.trades: list[tuple[float, float, str]] = []
-        self.last_alive: float | None = None      # any message, incl. PONG
+        self.last_alive: float | None = None  # any message, incl. PONG
         self.block = 0
         self.t0: float | None = None
         self.desyncs = 0
@@ -72,7 +75,7 @@ class StreamCore:
         except json.JSONDecodeError:
             log.debug("non-json message ignored: %.60s", raw)
             return
-        for ev in (data if isinstance(data, list) else [data]):
+        for ev in data if isinstance(data, list) else [data]:
             if isinstance(ev, dict):
                 self._event(ev)
 
@@ -115,14 +118,15 @@ class StreamCore:
             return
         if abs(max(self.bids) - _f(bb)) > 1e-9 or abs(min(self.asks) - _f(ba)) > 1e-9:
             self.desyncs += 1
-            log.warning("local book disagrees with venue best bid/ask (%s/%s vs %s/%s)",
-                        max(self.bids), min(self.asks), bb, ba)
+            log.warning(
+                "local book disagrees with venue best bid/ask (%s/%s vs %s/%s)", max(self.bids), min(self.asks), bb, ba
+            )
 
     # ---- snapshot ------------------------------------------------------
     def _side(self, book: dict[float, float], reverse: bool) -> tuple[tuple[float, float], ...]:
         lv = sorted(book.items(), reverse=reverse)[: self.levels]
         step = (self.tick_size or 0.01) * (-1 if reverse else 1)
-        while len(lv) < self.levels:                  # pad with empty far levels
+        while len(lv) < self.levels:  # pad with empty far levels
             lv.append((round((lv[-1][0] if lv else 0.5) + step, 8), 0.0))
         return tuple(lv)
 
@@ -130,9 +134,15 @@ class StreamCore:
         """One tick for the block ending now. None while there is no usable two-sided book."""
         if not (self.have_book and self.bids and self.asks) or max(self.bids) >= min(self.asks):
             return None
-        t = Tick(self.block, round(ts_now - (self.t0 or ts_now), 6), self._side(self.bids, True),
-                 self._side(self.asks, False), tuple(self.trades), None,
-                 data_age_ms=round(((ts_now - self.last_alive) * 1000) if self.last_alive else 0.0, 1))
+        t = Tick(
+            self.block,
+            round(ts_now - (self.t0 or ts_now), 6),
+            self._side(self.bids, True),
+            self._side(self.asks, False),
+            tuple(self.trades),
+            None,
+            data_age_ms=round(((ts_now - self.last_alive) * 1000) if self.last_alive else 0.0, 1),
+        )
         self.trades = []
         self.block += 1
         return t
@@ -176,14 +186,15 @@ class LiveFeed:
     """Live market channel. Reconnects with backoff; while down it keeps emitting the last known
     book with a growing data_age_ms, which the risk engine turns into a veto."""
 
-    def __init__(self, token_id: str, block_ms: float = 1000.0, record: str | None = None,
-                 max_blocks: int | None = None):
+    def __init__(
+        self, token_id: str, block_ms: float = 1000.0, record: str | None = None, max_blocks: int | None = None
+    ):
         self.core = StreamCore(token_id, block_ms)
         self.token, self.block_s, self.max_blocks = token_id, block_ms / 1000.0, max_blocks
         self.rec = None
         if record:
             Path(record).parent.mkdir(parents=True, exist_ok=True)
-            self.rec = open(record, "w")
+            self.rec = open(record, "w")  # noqa: SIM115  (kept open for the session, closed in __aiter__'s finally)
             self.rec.write(json.dumps({"kind": "meta", "token": token_id, "url": WS_URL, "t": time.time()}) + "\n")
         self._stop = False
 
@@ -193,12 +204,14 @@ class LiveFeed:
 
     async def _receiver(self) -> None:
         import websockets
+
         backoff = 1.0
         while not self._stop:
             try:
                 async with websockets.connect(WS_URL, ping_interval=None, open_timeout=10) as ws:
-                    await ws.send(json.dumps({"assets_ids": [self.token], "type": "market",
-                                              "custom_feature_enabled": True}))
+                    await ws.send(
+                        json.dumps({"assets_ids": [self.token], "type": "market", "custom_feature_enabled": True})
+                    )
                     log.info("subscribed to %s", self.token)
                     backoff = 1.0
                     hb = asyncio.create_task(self._heartbeat(ws))
@@ -207,13 +220,15 @@ class LiveFeed:
                             now = time.time()
                             raw = raw.decode() if isinstance(raw, bytes) else raw
                             if self.rec:
-                                self.rec.write(json.dumps({"kind": "msg", "t": now, "token": self.token, "raw": raw}) + "\n")
+                                self.rec.write(
+                                    json.dumps({"kind": "msg", "t": now, "token": self.token, "raw": raw}) + "\n"
+                                )
                             self.core.feed_raw(raw, now)
                     finally:
                         hb.cancel()
             except Exception as e:
                 log.warning("market socket down: %r (retry in %.0fs)", e, backoff)
-            self.core.have_book = False      # force a fresh snapshot after any reconnect
+            self.core.have_book = False  # force a fresh snapshot after any reconnect
             await asyncio.sleep(backoff)
             backoff = min(30.0, backoff * 2)
 
@@ -234,8 +249,15 @@ class LiveFeed:
                 tick = self.core.snapshot(now)
                 if tick is None and last is not None and self.core.last_alive:
                     # socket down: re-emit the last book, but say how old it is
-                    tick = Tick(self.core.block, round(now - (self.core.t0 or now), 6), last.bids, last.asks, (), None,
-                                data_age_ms=round((now - self.core.last_alive) * 1000, 1))
+                    tick = Tick(
+                        self.core.block,
+                        round(now - (self.core.t0 or now), 6),
+                        last.bids,
+                        last.asks,
+                        (),
+                        None,
+                        data_age_ms=round((now - self.core.last_alive) * 1000, 1),
+                    )
                     self.core.block += 1
                 if tick:
                     last = tick
@@ -252,17 +274,21 @@ class LiveFeed:
 
 # ---------------------------------------------------------------------------
 def _get(url: str) -> Any:
-    req = urllib.request.Request(url, headers={"User-Agent": "jevbot/0.1"})
-    with urllib.request.urlopen(req, timeout=15) as r:
+    if not url.startswith("https://"):
+        raise ValueError("refusing to fetch a non-https URL")
+    req = urllib.request.Request(url, headers={"User-Agent": "jevbot/0.1"})  # noqa: S310
+    with urllib.request.urlopen(req, timeout=15) as r:  # noqa: S310  (https-only, checked above)
         return json.loads(r.read())
 
 
 def list_markets(limit: int = 200, min_days: float = 7.0, mid_lo: float = 0.2, mid_hi: float = 0.8) -> list[dict]:
     """Candidate markets for a quoting bot: open, order-book enabled, mid away from 0/1, not about to resolve,
     spread of at least two ticks (otherwise there is nothing to earn)."""
-    from datetime import datetime, timezone
-    q = urllib.parse.urlencode({"active": "true", "closed": "false", "limit": limit,
-                                "order": "volume24hr", "ascending": "false"})
+    from datetime import datetime
+
+    q = urllib.parse.urlencode(
+        {"active": "true", "closed": "false", "limit": limit, "order": "volume24hr", "ascending": "false"}
+    )
     out = []
     for m in _get(f"{GAMMA_URL}/markets?{q}"):
         try:
@@ -272,12 +298,25 @@ def list_markets(limit: int = 200, min_days: float = 7.0, mid_lo: float = 0.2, m
             end = datetime.fromisoformat(m["endDate"].replace("Z", "+00:00")) if m.get("endDate") else None
         except (KeyError, TypeError, ValueError):
             continue
-        days = (end - datetime.now(timezone.utc)).total_seconds() / 86400 if end else 999
+        days = (end - datetime.now(UTC)).total_seconds() / 86400 if end else 999
         mid = (bb + ba) / 2
-        if not (m.get("enableOrderBook") and toks and mid_lo <= mid <= mid_hi and days >= min_days
-                and (ba - bb) >= 2 * tick - 1e-9):
+        if not (
+            m.get("enableOrderBook")
+            and toks
+            and mid_lo <= mid <= mid_hi
+            and days >= min_days
+            and (ba - bb) >= 2 * tick - 1e-9
+        ):
             continue
-        out.append({"question": m.get("question"), "token_yes": toks[0], "mid": round(mid, 3),
-                    "spread": round(ba - bb, 4), "tick": tick, "vol24h": float(m.get("volume24hr") or 0),
-                    "days_left": round(days, 1)})
+        out.append(
+            {
+                "question": m.get("question"),
+                "token_yes": toks[0],
+                "mid": round(mid, 3),
+                "spread": round(ba - bb, 4),
+                "tick": tick,
+                "vol24h": float(m.get("volume24hr") or 0),
+                "days_left": round(days, 1),
+            }
+        )
     return out

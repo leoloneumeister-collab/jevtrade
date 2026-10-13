@@ -1,4 +1,5 @@
 """Plain arithmetic on price history. Uses only bars up to and including the last one given."""
+
 from __future__ import annotations
 
 import math
@@ -23,7 +24,7 @@ def features(bars: list[Bar]) -> dict:
     c = [b.c for b in bars]
     last = c[-1]
     lr = [math.log(c[i] / c[i - 1]) for i in range(1, len(c))]
-    tr = [max(b.h - b.l, abs(b.h - p.c), abs(b.l - p.c)) for p, b in zip(bars, bars[1:])]
+    tr = [max(b.h - b.l, abs(b.h - p.c), abs(b.l - p.c)) for p, b in zip(bars, bars[1:], strict=False)]
     win = c[-252:]
     f = {
         "ret_1d_pct": (last / c[-2] - 1) * 100,
