@@ -90,7 +90,7 @@ def cmd_markets(a, cfg: Config) -> None:
 
 def cmd_web(a, cfg: Config) -> None:
     from .stock_app import serve
-    serve(cfg.jev.model, a.port)
+    serve(cfg.jev.model, a.port, open_browser=not a.no_browser)
 
 
 def cmd_models(a, cfg: Config) -> None:
@@ -133,7 +133,7 @@ def main() -> None:
     c = sub.add_parser("compare"); c.add_argument("--blocks", type=int, default=8000); c.set_defaults(fn=cmd_compare)
     mk = sub.add_parser("markets"); mk.add_argument("--top", type=int, default=15); mk.add_argument("--min-days", type=float, default=7.0)
     mk.set_defaults(fn=cmd_markets)
-    w = sub.add_parser("web"); w.add_argument("--port", type=int, default=8000); w.set_defaults(fn=cmd_web)
+    w = sub.add_parser("web"); w.add_argument("--port", type=int, default=8000); w.add_argument("--no-browser", action="store_true"); w.set_defaults(fn=cmd_web)
     sub.add_parser("models").set_defaults(fn=cmd_models)
     sub.add_parser("check").set_defaults(fn=cmd_check)
     rp = sub.add_parser("report"); rp.add_argument("journal", nargs="?"); rp.set_defaults(fn=lambda a, cfg: print_report(a.journal or cfg.run.journal))

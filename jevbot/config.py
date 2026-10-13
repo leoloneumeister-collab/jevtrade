@@ -104,6 +104,9 @@ def _fill(obj: Any, data: dict[str, Any], path: str = "") -> None:
 
 def load_config(path: str | Path | None = "config.toml") -> Config:
     cfg = Config()
+    if path and not Path(path).exists():                  # fall back to the config that ships next to the package
+        shipped = Path(__file__).resolve().parent.parent / Path(path).name
+        path = shipped if shipped.exists() else path
     if path and Path(path).exists():
-        _fill(cfg, tomllib.loads(Path(path).read_text()))
+        _fill(cfg, tomllib.loads(Path(path).read_text(encoding="utf-8")))
     return cfg

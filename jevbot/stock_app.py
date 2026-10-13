@@ -189,16 +189,34 @@ def make_handler(asker, model: str, log_path: str, has_key: bool):
     return H
 
 
-def serve(model: str, port: int = 8000, log_path: str = "runs/predictions.jsonl") -> None:
+DEFAULT_MODEL = "jev-1.13.0"
+
+
+def serve(model: str, port: int = 8000, log_path: str = "runs/predictions.jsonl", open_browser: bool = True) -> None:
+    import webbrowser
+    model = model if model not in ("", "jev-latest") else DEFAULT_MODEL
     key = bool(os.environ.get("TYPESAFE_API_KEY"))
 
     async def asker(snap, h):
         # one client per event loop: asyncio.run() makes a fresh loop per request
         return await ask(_client(model), model, snap, h)
 
-    srv = ThreadingHTTPServer(("127.0.0.1", port), make_handler(asker, model, log_path, key))
-    print(f"Open http://127.0.0.1:{port}   (model {model}, key {'found' if key else 'MISSING'})")
+    handler, srv = make_handler(asker, model, log_path, key), None
+    for p in range(port, port + 11):                      # port busy? try the next ones
+        try:
+            srv = ThreadingHTTPServer(("127.0.0.1", p), handler)
+            break
+        except OSError:
+            print(f"Port {p} is busy, trying the next one...")
+    if srv is None:
+        raise SystemExit(f"No free port between {port} and {port + 10}. Close other programs or pass --port.")
+    url = f"http://127.0.0.1:{srv.server_address[1]}"
+    print(f"\nJev Stock Check is running at {url}")
+    print(f"Model {model} | API key {'found' if key else 'NOT SET (set TYPESAFE_API_KEY, then restart)'}")
+    print("Keep this window open while you use it. Press Ctrl+C to stop.\n")
+    if open_browser:
+        webbrowser.open(url)                              # server is already listening, so no race
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
-        pass
+        print("Stopped.")

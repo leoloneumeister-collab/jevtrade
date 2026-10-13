@@ -59,3 +59,10 @@ jevbot web                         # then open http://127.0.0.1:8000
 - Prices come from Yahoo (unofficial) then Stooq, both free and keyless. Not tested live from the build sandbox
   (it blocks them). The "demo data" box uses fake prices so the page works offline.
 - Paper only: the app has no broker connection and cannot place orders.
+
+### If the page says "127.0.0.1 refused to connect"
+That means no server is listening. Check the terminal where you ran `jevbot web`:
+- It must still be open and show "Jev Stock Check is running at http://127.0.0.1:XXXX". Use that exact address, the port can differ.
+- If it printed an error or went back to the prompt, the app stopped. Copy the error.
+- `jevbot` not found? Use `python -m jevbot web` (Windows: `py -m jevbot web`) from the project folder with the venv active.
+- The app opens your browser by itself once the server is ready (`--no-browser` turns that off).
