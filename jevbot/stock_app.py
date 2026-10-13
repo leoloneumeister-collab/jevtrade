@@ -332,8 +332,8 @@ MAX_WATCHLIST = 25
 
 
 async def scan(asker, symbols: list[str], h: int, demo, log_path: str | None, conc: int = 4) -> dict:
-    src = norm_src(demo)
     """Ask Jev about many tickers. One bad ticker never sinks the rest. Capped to protect your credit."""
+    src = norm_src(demo)
     syms = [s.strip() for s in symbols if s.strip()]
     truncated = len(syms) > MAX_WATCHLIST
     syms = syms[:MAX_WATCHLIST]
@@ -467,7 +467,7 @@ def _num(q: dict, name: str, cast, default):
     return val
 
 
-EXPENSIVE = ("/api/analyze", "/api/backtest", "/api/scan")  # these spend Jev credit
+EXPENSIVE = ("/api/analyze", "/api/backtest", "/api/scan", "/api/cross")  # these spend Jev credit
 PUBLIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
@@ -575,6 +575,17 @@ def make_handler(asker, model: str, log_path: str, has_key: bool, rate_limit: tu
                                 )
                             )
                         )
+                    if u.path == "/api/cross":
+                        from . import cross
+
+                        raw = q.get("symbols", "").strip()
+                        default = file_symbols() if demo == "file" else DEFAULT_WATCHLIST.split(",")
+                        cost = max(0.0, min(_num(q, "cost", float, ROUND_TRIP_COST_PCT), 5.0))
+                        skip = max(0, _num(q, "skip", int, 0))
+                        run = cross.cross_test(
+                            asker, raw.split(",") if raw else default, h, _num(q, "n", int, 60), demo, cost, skip
+                        )
+                        return self._json(asyncio.run(run))
                     return self._json(asyncio.run(scan(asker, q.get("symbols", "").split(","), h, demo, log_path)))
                 self._send(404, b"not found", "text/plain")
             except ValueError as e:

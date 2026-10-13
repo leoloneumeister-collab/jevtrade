@@ -37,6 +37,15 @@
   </div>
 
   <div class="card">
+    <h2>Cross-stock ranking test</h2>
+    <p class="mute mb8">The fairest test of Jev. Each day it rates every stock, we rank them, then compare the top fifth with the bottom fifth. Market drift and Jev's overall mood cancel out. Needs at least 5 stocks. Leave tickers empty to use every CSV in your data folder (or the default list for live prices).</p>
+    <div class="row"><div class="grow"><label for="xs">Tickers (optional)</label><input id="xs" type="text" class="wfull" placeholder="empty = all your CSV files"></div>
+      <div><label for="xn">Days</label><select id="xn"><option value="40">40</option><option value="80">80</option><option value="150" selected>150</option></select></div>
+      <button id="xt">Run ranking test</button></div>
+    <div id="xout" class="mt10"></div>
+  </div>
+
+  <div class="card">
     <h2>Forward scoreboard</h2>
     <p class="mute mb8">Every live read is saved (file and demo reads never are). After the look-ahead period passes, it is checked against what the price did. This is the only test that cannot be fooled by old data.</p>
     <div id="sb">Loading...</div>

@@ -79,4 +79,5 @@ That means no server is listening. Check the terminal where you ran `jevbot web`
 ### Daily scan and scoreboard export
 - `jevbot scan [--symbols A,B,C] [--h 5]` asks Jev about a watchlist and saves every read (one per ticker, day, horizon).
 - `docs/SCHEDULE.md` shows how to run it every weekday on a Mac. The scoreboard page has a CSV download.
+- `jevbot cross` is the fairest test: rank many stocks by Jev's score each day, compare top fifth vs bottom fifth.
 - Past tests compare Jev with a 3-line momentum rule and with simply holding, and count only non-overlapping signals.

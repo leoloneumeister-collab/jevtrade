@@ -129,6 +129,51 @@ def cmd_scan(a, cfg: Config) -> None:
         sys.exit(1)
 
 
+def cmd_cross(a, cfg: Config) -> None:
+    """Does Jev rank stocks against each other better than chance, and better than a free momentum rule?"""
+    from . import cross, stock_app
+    from .market_data import file_symbols
+
+    if not os.environ.get("TYPESAFE_API_KEY"):
+        sys.exit("Set TYPESAFE_API_KEY first.")
+    syms = (
+        a.symbols.split(",")
+        if a.symbols
+        else (file_symbols() if a.src == "file" else stock_app.DEFAULT_WATCHLIST.split(","))
+    )
+    asker = stock_app.make_asker(stock_app.resolve_model(cfg.jev.model))
+    try:
+        r = asyncio.run(cross.cross_test(asker, syms, a.h, a.n, a.src, a.cost, a.skip))
+    except ValueError as e:
+        sys.exit(str(e))
+    print(
+        f"{r['n_stocks']} stocks, {r['n_dates']} days ({r['first_date']} to {r['last_date']}), look-ahead {r['h']} days, "
+        f"{r['calls']} Jev calls, {r['errors']} failed, data: {r['src']}"
+    )
+    if r["skipped"]:
+        print("Skipped:", "; ".join(r["skipped"]))
+    print(f"\n{'':22}{'Jev':>10}{'momentum':>11}")
+    j, m = r["jev"], r["momentum"]
+    rows = [
+        ("rank link (IC)", "ic_mean"),
+        ("IC t-stat", "ic_t"),
+        ("top 20% minus bottom 20%", "spread_mean_pct"),
+        ("  same, after costs", "spread_net_pct"),
+        ("independent days", "independent_dates"),
+    ]
+    for label, k in rows:
+        fmt = lambda v: "n/a" if v is None else f"{v:+.3f}" if isinstance(v, float) else str(v)  # noqa: E731
+        print(f"{label:<24}{fmt(j[k]):>8}{fmt(m[k]):>11}")
+    print("\nAverage move over the next days, by Jev's rank (Q1 = least bullish ... Q5 = most bullish):")
+    print(
+        "  "
+        + "  ".join(f"Q{k + 1} {v:+.2f}%" for k, v in enumerate(j["quintiles"]))
+        + f"   (all stocks {j['universe_avg_pct']:+.2f}%)"
+    )
+    print("  momentum rank:  " + "  ".join(f"Q{k + 1} {v:+.2f}%" for k, v in enumerate(m["quintiles"])))
+    print(f"\nVerdict: {r['verdict']}\n{r['caveat']}")
+
+
 def cmd_import_csv(a, cfg: Config) -> None:
     from .market_data import import_csv
 
@@ -208,6 +253,16 @@ def main() -> None:
     sc.add_argument("--log", default="runs/predictions.jsonl")
     sc.add_argument("--demo", action="store_true")
     sc.set_defaults(fn=cmd_scan)
+    cr = sub.add_parser("cross", help="cross-stock ranking test: Jev vs chance vs momentum")
+    cr.add_argument(
+        "--symbols", help="comma separated; default: every CSV in data/ (or the default watchlist for live)"
+    )
+    cr.add_argument("--src", choices=["live", "file", "demo"], default="file")
+    cr.add_argument("--h", type=int, default=5)
+    cr.add_argument("--n", type=int, default=60)
+    cr.add_argument("--cost", type=float, default=0.10)
+    cr.add_argument("--skip", type=int, default=0)
+    cr.set_defaults(fn=cmd_cross)
     ic = sub.add_parser("import-csv", help="add a downloaded price CSV (Yahoo, Stooq, ...) to data/")
     ic.add_argument("file")
     ic.add_argument("--symbol", required=True)

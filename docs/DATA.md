@@ -32,3 +32,18 @@ Run several windows on the same stock to see whether a result is consistent or j
 ## The honest caveat about old data
 Jev may have seen any period before its training cutoff. A good result on 2004 to 2013 prices says very little. Use
 recent data when you can, and trust only the **forward scoreboard**: reads made today, judged later.
+
+## Cross-stock ranking test (the fairest test)
+Testing one stock at a time mixes Jev's skill with the market's drift and with Jev's own bullish or bearish mood.
+The ranking test removes both: every day Jev rates every stock, the stocks are ranked, and we compare what the top
+fifth and the bottom fifth did over the next few days.
+```
+# put 20+ stocks in data/ first (jevbot import-csv ... --symbol X), then:
+jevbot cross --src file --h 5 --n 60
+```
+- **Rank link (IC):** average rank correlation between Jev's score and what happened next. 0 is chance.
+- **Top 20% minus bottom 20%:** the long-short spread, also shown after costs (two legs).
+- **Momentum column:** the same test for a free rule (20-day return). Jev has to beat this to add anything.
+- **Independent days:** forward windows overlap, so t-stats use every h-th day only. Under 20, no verdict.
+- **Budget guard:** one run is capped at 6,000 Jev calls (stocks x days) and 40 stocks.
+- Also in the page ("Cross-stock ranking test") and at `/api/cross`.

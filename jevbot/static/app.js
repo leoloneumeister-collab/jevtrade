@@ -4,7 +4,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const pct=x=>x==null?'n/a':(x>0?'+':'')+x.toFixed(2)+'%';
 const lab={ 'LEAN UP':['UP','Lean up'],'LEAN DOWN':['DOWN','Lean down'],'SIT OUT':['OUT','Sit out'] };
 async function api(path){const r=await fetch(path,{headers:{'X-Jevbot':'1'}});const j=await r.json();if(!r.ok)throw new Error(j.error||r.statusText);return j}
-function busy(on){['go','bt','sc'].forEach(i=>$(i).disabled=on)}
+function busy(on){['go','bt','sc','xt'].forEach(i=>$(i).disabled=on)}
 function bar(name,p,color){return `<div class="bar"><span>${name}</span><div class="track"><div class="fill" data-w="${(p*100).toFixed(0)}" data-c="${color}"></div></div><span>${(p*100).toFixed(0)}%</span></div>`}
 function chart(s){
   const v=s.map(x=>x[1]),mn=Math.min(...v),mx=Math.max(...v),W=640,H=170,p=6;
@@ -78,3 +78,21 @@ async function fileHint(){
     el.textContent=d.symbols.length?'CSV files for: '+d.symbols.join(', '):'No CSV files yet. Run: jevbot import-csv FILE --symbol AAPL'}
   catch(e){el.hidden=false;el.textContent=e.message}}
 $('src').onchange=fileHint;
+
+const f3=v=>v==null?'n/a':(v>0?'+':'')+Number(v).toFixed(3);
+function xTable(r){
+  const row=(n,s)=>`<tr><td><b>${n}</b></td><td>${f3(s.ic_mean)}</td><td>${f3(s.ic_t)}</td><td>${pct(s.spread_mean_pct)}</td><td>${pct(s.spread_net_pct)}</td><td>${s.independent_dates}</td></tr>`;
+  return `<table><tr><th></th><th>Rank link (IC)</th><th>t-stat</th><th>Top 20% minus bottom 20%</th><th>After costs</th><th>Indep. days</th></tr>${row('Jev',r.jev)}${row('Momentum rule',r.momentum)}</table>`}
+function xBars(name,q){
+  const m=Math.max(...q.map(Math.abs),0.01);
+  return `<p class="mute small mt10">${esc(name)}: average move over the next ${'days'} by rank (Q1 least bullish ... Q5 most bullish)</p><div class="bars">`+
+    q.map((v,i)=>`<div class="bar"><span>Q${i+1}</span><div class="track"><div class="fill" data-w="${(Math.abs(v)/m*100).toFixed(0)}" data-c="${v>=0?'var(--up)':'var(--down)'}"></div></div><span>${pct(v)}</span></div>`).join('')+'</div>'}
+async function cross(){
+  busy(true);$('xout').innerHTML='<span class="mute">Asking Jev about every stock on every day. Takes a few minutes for a long test.</span>';
+  try{const r=await api(`/api/cross?symbols=${encodeURIComponent($('xs').value)}&h=${$('h').value}&n=${$('xn').value}&cost=${encodeURIComponent($('cost').value)}&src=${$('src').value}`);
+    $('xout').innerHTML=`<div class="mute small">${r.n_stocks} stocks, ${r.n_dates} days (${esc(r.first_date)} to ${esc(r.last_date)}), ${r.calls} Jev questions, ${r.errors} failed${r.demo?' (FAKE prices)':''}</div>
+      ${xTable(r)}${xBars('Jev',r.jev.quintiles)}${xBars('Momentum rule',r.momentum.quintiles)}
+      <p class="verdict">${esc(r.verdict)}</p><p class="mute small2">${esc(r.caveat)}${r.skipped.length?' Skipped: '+esc(r.skipped.join('; ')):''}</p>`;
+    paintBars($('xout'))}
+  catch(e){$('xout').innerHTML=`<span class="err">${esc(e.message)}</span>`}finally{busy(false)}}
+$('xt').onclick=cross;
