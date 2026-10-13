@@ -374,6 +374,20 @@ class RateLimiter:
             return True
 
 
+def _num(q: dict, name: str, cast, default):
+    """Parse a query number or raise a message a person can act on. Rejects nan and inf."""
+    raw = q.get(name)
+    if raw is None:
+        return default
+    try:
+        val = cast(raw)
+        if cast is float and not math.isfinite(val):
+            raise ValueError
+    except (ValueError, OverflowError):
+        raise ValueError(f"'{name}' must be a plain number, got '{raw[:20]}'.") from None
+    return val
+
+
 EXPENSIVE = ("/api/analyze", "/api/backtest", "/api/scan")  # these spend Jev credit
 PUBLIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -458,17 +472,17 @@ def make_handler(asker, model: str, log_path: str, has_key: bool, rate_limit: tu
                         )
                     if not limiter.allow():
                         return self._json({"error": "Too many requests. Wait a minute."}, 429)
-                    demo, h = q.get("demo") == "1", max(1, min(int(q.get("h", 5)), 20))
+                    demo, h = q.get("demo") == "1", max(1, min(_num(q, "h", int, 5), 20))
                     if u.path == "/api/analyze":
                         return self._json(
                             asyncio.run(analyze(asker, check_symbol(q.get("symbol", "")), h, demo, log_path))
                         )
                     if u.path == "/api/backtest":
-                        cost = max(0.0, min(float(q.get("cost", ROUND_TRIP_COST_PCT)), 5.0))
+                        cost = max(0.0, min(_num(q, "cost", float, ROUND_TRIP_COST_PCT), 5.0))
                         return self._json(
                             asyncio.run(
                                 backtest(
-                                    asker, check_symbol(q.get("symbol", "")), h, int(q.get("n", 120)), demo, cost=cost
+                                    asker, check_symbol(q.get("symbol", "")), h, _num(q, "n", int, 120), demo, cost=cost
                                 )
                             )
                         )

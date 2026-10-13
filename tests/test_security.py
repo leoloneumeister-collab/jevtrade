@@ -150,3 +150,49 @@ def test_overlong_watchlist_is_refused(server):
 def test_errors_are_json(server):
     st, h, body = req(server(), "/api/analyze?symbol=%24%24", OK)
     assert st == 400 and "application/json" in h["Content-Type"] and "error" in json.loads(body)
+
+
+# ---- the same server, exercised end to end -------------------------------------------------------
+def test_backtest_over_http_clamps_cost_and_returns_both_columns(server):
+    st, _, body = req(server(), "/api/backtest?symbol=AAPL&h=5&n=40&cost=999&demo=1", OK)
+    d = json.loads(body)
+    assert st == 200 and d["cost_pct"] == 5.0 and {"stats", "rule_stats", "comparison", "caveat"} <= set(d)
+
+
+def test_scan_over_http_returns_sorted_rows(server):
+    st, _, body = req(server(), "/api/scan?symbols=AAPL,MSFT&h=5&demo=1", OK)
+    rows = json.loads(body)["rows"]
+    assert st == 200 and [r["symbol"] for r in rows] == ["AAPL", "MSFT"] and rows[0]["p_up"] >= rows[1]["p_up"]
+
+
+def test_scoreboard_and_csv_start_empty(server):
+    s = server()
+    assert json.loads(req(s, "/api/scoreboard", OK)[2]) == {"made": 0, "pending": 0, "stats": None, "recent": []}
+    assert req(s, "/api/scoreboard.csv")[2].decode().startswith("made_at,symbol")
+
+
+@pytest.mark.parametrize(
+    "q,name", [("h=abc", "h"), ("n=x", "n"), ("cost=nan", "cost"), ("cost=inf", "cost"), ("h=1e999", "h")]
+)
+def test_bad_numbers_are_a_clean_400_not_a_crash(server, q, name):
+    st, _, body = req(server(), f"/api/backtest?symbol=AAPL&demo=1&{q}", OK)
+    msg = json.loads(body)["error"]
+    assert st == 400 and f"'{name}'" in msg and "Traceback" not in msg and "literal" not in msg
+
+
+def test_blank_number_means_default(server):
+    assert req(server(), "/api/backtest?symbol=AAPL&demo=1&n=30&h=", OK)[0] == 200
+
+
+def test_missing_key_is_reported_not_crashed(tmp_path):
+    srv = ThreadingHTTPServer(
+        ("127.0.0.1", 0), stock_app.make_handler(fake_asker, "m", str(tmp_path / "p.jsonl"), False)
+    )
+    threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
+    try:
+        st, _, body = req(srv, "/api/analyze?symbol=AAPL&demo=1", OK)
+        assert st == 400 and "TYPESAFE_API_KEY" in json.loads(body)["error"]
+        assert json.loads(req(srv, "/api/status", OK)[2])["has_key"] is False
+    finally:
+        srv.shutdown()
+        srv.server_close()
