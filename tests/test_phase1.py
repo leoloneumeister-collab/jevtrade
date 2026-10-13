@@ -135,3 +135,26 @@ def test_scan_isolates_failures_and_sorts(tmp_path):
 def test_scan_caps_the_watchlist_to_protect_your_wallet():
     out = asyncio.run(scan(lambda s, h: _always(A()), [f"T{i}" for i in range(60)], 5, True, None))
     assert len(out["rows"]) == 25 and out["truncated"] is True
+
+
+# ---- threshold-free ranking test -------------------------------------------------------------
+def test_rank_stats_detect_a_real_relationship():
+    rows = [{"i": i, "lean": "SIT OUT", "p_up": i / 100, "fwd": (i - 50) / 25} for i in range(100)]
+    s = summarize(rows, h=5)
+    assert s["rank_corr"] > 0.99 and s["top20_avg_pct"] > s["bottom20_avg_pct"]
+    assert s["top20_avg_pct"] == pytest.approx(sum((i - 50) / 25 for i in range(80, 100)) / 20)
+
+
+def test_rank_stats_see_nothing_in_noise_and_refuse_small_samples():
+    import random
+
+    rnd = random.Random(3)
+    rows = [{"i": i, "lean": "SIT OUT", "p_up": rnd.random(), "fwd": rnd.gauss(0, 2)} for i in range(400)]
+    assert abs(summarize(rows, h=5)["rank_corr"]) < 0.15
+    few = summarize(rows[:30], h=5)
+    assert few["rank_corr"] is None and few["top20_avg_pct"] is None
+
+
+def test_rank_stats_only_apply_to_jevs_own_column():
+    rows = [{"i": i, "lean": "SIT OUT", "rule_lean": "LEAN UP", "p_up": i / 100, "fwd": 1.0} for i in range(100)]
+    assert summarize(rows, h=5, key="rule_lean")["rank_corr"] is None  # p_up is Jev's, not the rule's

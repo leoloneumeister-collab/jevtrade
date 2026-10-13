@@ -162,6 +162,41 @@ def _bins(pairs: list[tuple[float, int]], edges=(0.0, 0.4, 0.5, 0.6, 0.7, 1.0001
 MIN_INDEPENDENT = 10  # fewer independent signals than this and we refuse to call anything
 
 
+def _ranks(v: list[float]) -> list[float]:
+    order = sorted(range(len(v)), key=lambda i: v[i])
+    r = [0.0] * len(v)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and v[order[j + 1]] == v[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            r[order[k]] = (i + j) / 2
+        i = j + 1
+    return r
+
+
+def rank_stats(rows: list[dict]) -> dict:
+    """Threshold-free test: do days Jev rates more bullish see better forward moves? Spearman correlation of p_up
+    with the realized move, and the average move in Jev's most vs least bullish 20% of days.
+    Overlapping windows inflate how convincing this looks, so treat it as a lead, not a result."""
+    if len(rows) < 50:
+        return {"rank_corr": None, "top20_avg_pct": None, "bottom20_avg_pct": None}
+    p, f = [r["p_up"] for r in rows], [r["fwd"] for r in rows]
+    ra, rb = _ranks(p), _ranks(f)
+    ma, mb = sum(ra) / len(ra), sum(rb) / len(rb)
+    num = sum((x - ma) * (y - mb) for x, y in zip(ra, rb, strict=True))
+    den = (sum((x - ma) ** 2 for x in ra) * sum((y - mb) ** 2 for y in rb)) ** 0.5
+    order = sorted(range(len(rows)), key=lambda i: p[i])
+    q = len(rows) // 5
+    top, bot = [f[i] for i in order[-q:]], [f[i] for i in order[:q]]
+    return {
+        "rank_corr": round(num / den, 3) if den else 0.0,
+        "top20_avg_pct": round(sum(top) / q, 3),
+        "bottom20_avg_pct": round(sum(bot) / q, 3),
+    }
+
+
 def non_overlapping(rows: list[dict], h: int, key: str = "lean", target: str = "LEAN UP") -> list[dict]:
     """Signals closer than h days share most of their outcome window, so they are not independent evidence.
     Greedy pick of signals at least h days apart, with a separate clock per symbol."""
@@ -205,6 +240,7 @@ def summarize(rows: list[dict], h: int = 5, cost: float = ROUND_TRIP_COST_PCT, k
         "avg_return_after_down_pct": round(sum(r["fwd"] for r in downs) / len(downs), 3) if downs else None,
         "sat_out": n - len(longs) - len(downs),
         "z_vs_baseline": None if z is None else round(z, 2),
+        **(rank_stats(rows) if key == "lean" else {"rank_corr": None, "top20_avg_pct": None, "bottom20_avg_pct": None}),
         "cost_pct": cost,
         "calibration": _bins([(r["p_up"], int(r["fwd"] > 0)) for r in rows]),
         "verdict": _verdict(len(ind), avg_ind, cost, z),

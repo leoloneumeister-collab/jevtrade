@@ -36,7 +36,9 @@ function statCells(s){return `<div class="grid">
    <div class="kv"><b>${pct(s.avg_return_after_long_pct)}</b><span>avg move after "lean up"</span></div>
    <div class="kv"><b>${pct(s.avg_return_after_long_net_pct)}</b><span>same, minus ${s.cost_pct}% costs</span></div>
    <div class="kv"><b>${pct(s.avg_return_all_days_pct)}</b><span>avg move on any day</span></div>
-   <div class="kv"><b>${s.sat_out}</b><span>days it sat out</span></div></div>`}
+   <div class="kv"><b>${s.sat_out}</b><span>days it sat out</span></div>
+   ${s.rank_corr==null?'':`<div class="kv"><b>${pct(s.top20_avg_pct)}</b><span>avg move after Jev's most bullish 20% of days</span></div>
+   <div class="kv"><b>${pct(s.bottom20_avg_pct)}</b><span>after its least bullish 20% (rank link ${s.rank_corr})</span></div>`}</div>`}
 function stats(s,title){
   const cal=s.calibration.map(b=>`<tr><td>${esc(b.range)}</td><td>${b.n}</td><td>${(b.was_up*100).toFixed(0)}%</td></tr>`).join('');
   return `<h2>${esc(title)}</h2>${statCells(s)}
