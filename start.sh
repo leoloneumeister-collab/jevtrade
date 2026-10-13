@@ -19,7 +19,12 @@ pip install -q -e .
 if [ -z "$TYPESAFE_API_KEY" ]; then
   printf "Paste your TypeSafe API key (typing is hidden), then press Enter: "
   read -r -s TYPESAFE_API_KEY; echo
-  export TYPESAFE_API_KEY
 fi
+TYPESAFE_API_KEY="$(printf '%s' "$TYPESAFE_API_KEY" | tr -d '[:space:]"'"'"'')"   # drop stray spaces, line breaks, quotes
+export TYPESAFE_API_KEY
+case "$TYPESAFE_API_KEY" in
+  apikey_*) echo "Key received (${#TYPESAFE_API_KEY} characters)." ;;
+  *) echo "Warning: that does not look like a TypeSafe key (they start with apikey_). Press Ctrl+C and try again." ;;
+esac
 
 exec jevbot web $JEVBOT_ARGS

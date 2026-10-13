@@ -184,7 +184,11 @@ def make_handler(asker, model: str, log_path: str, has_key: bool):
             except ValueError as e:
                 self._json({"error": str(e)}, 400)
             except Exception as e:
-                self._json({"error": f"{type(e).__name__}: {e}"}, 502)
+                msg = f"{type(e).__name__}: {e}"
+                if "Authentication" in type(e).__name__ or "401" in str(e):
+                    msg = ("TypeSafe rejected the API key (401). Stop the app with Ctrl+C, run ./start.sh again and "
+                           "paste the full key, with no spaces. Keys start with apikey_.")
+                self._json({"error": msg}, 502)
 
     return H
 
