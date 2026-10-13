@@ -76,14 +76,13 @@ def test_backtest_only_shows_asker_the_past():
     assert max(i for i in range(60, len(bars)) if features(bars[: i + 1]) in seen) <= len(bars) - 1 - 5
 
 
-def test_summarize_math_and_verdicts():
+def test_summarize_math():
     rows = [{"lean": "LEAN UP", "p_up": .8, "fwd": 1.0}] * 20 + [{"lean": "SIT OUT", "p_up": .5, "fwd": -1.0}] * 20
     s = summarize(rows)
     assert s["long_hit_rate"] == 1.0 and s["baseline_up_rate"] == .5 and s["sat_out"] == 20
-    assert s["avg_return_after_long_net_pct"] == pytest.approx(0.9) and "Promising" in s["verdict"]
-    few = summarize(rows[:3])
-    assert "Too few" in few["verdict"]
-    flat = summarize([{"lean": "LEAN UP", "p_up": .8, "fwd": 0.05 if i % 2 else -0.05} for i in range(30)])
+    assert s["avg_return_after_long_net_pct"] == pytest.approx(0.9)
+    assert "Too few" in s["verdict"]                      # 20 back-to-back signals are only 4 independent ones
+    flat = summarize([{"i": i * 5, "lean": "LEAN UP", "p_up": .8, "fwd": 0.05 if i % 2 else -0.05} for i in range(30)])
     assert "No demonstrated edge" in flat["verdict"]
 
 

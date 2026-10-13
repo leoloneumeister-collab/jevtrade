@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .market_data import Bar, check_symbol, demo_bars, fetch_bars
-from .stock_features import features
+from .stock_features import features, momentum_rule
 from .stock_jev import StockPolicy, ask, lean
 
 STATIC = Path(__file__).parent / "static"
@@ -65,62 +65,120 @@ def _bins(pairs: list[tuple[float, int]], edges=(0.0, 0.4, 0.5, 0.6, 0.7, 1.0001
     return out
 
 
-def summarize(rows: list[dict]) -> dict:
-    """rows: per-day dicts with lean, p_up, fwd (percent). Honest stats, with the caveats attached."""
+MIN_INDEPENDENT = 10        # fewer independent signals than this and we refuse to call anything
+
+
+def non_overlapping(rows: list[dict], h: int, key: str = "lean", target: str = "LEAN UP") -> list[dict]:
+    """Signals closer than h days share most of their outcome window, so they are not independent evidence.
+    Greedy pick of signals at least h days apart, with a separate clock per symbol."""
+    picked, last = [], {}
+    for r in sorted(rows, key=lambda r: (r.get("symbol", ""), r["i"])):
+        sym = r.get("symbol", "")
+        if r[key] == target and (sym not in last or r["i"] - last[sym] >= h):
+            picked.append(r)
+            last[sym] = r["i"]
+    return picked
+
+
+def summarize(rows: list[dict], h: int = 5, cost: float = ROUND_TRIP_COST_PCT, key: str = "lean") -> dict:
+    """rows carry the day index `i`, a call under `key`, p_up and the realized forward move `fwd` in percent.
+    Hit rate, average move and the z score use only independent (non-overlapping) signals."""
+    rows = [{**r, "i": r.get("i", k)} for k, r in enumerate(rows)]
     n = len(rows)
-    ups = [r for r in rows if r["fwd"] > 0]
-    base = len(ups) / n if n else 0.0
-    longs = [r for r in rows if r["lean"] == "LEAN UP"]
-    downs = [r for r in rows if r["lean"] == "LEAN DOWN"]
-    hit = sum(r["fwd"] > 0 for r in longs) / len(longs) if longs else None
-    z = None
-    if longs and 0 < base < 1:
-        z = (hit - base) / math.sqrt(base * (1 - base) / len(longs))
-    avg_all = sum(r["fwd"] for r in rows) / n if n else 0.0
-    avg_long = sum(r["fwd"] for r in longs) / len(longs) if longs else None
+    base = sum(r["fwd"] > 0 for r in rows) / n if n else 0.0
+    longs = [r for r in rows if r[key] == "LEAN UP"]
+    ind = non_overlapping(rows, h, key)
+    downs = [r for r in rows if r[key] == "LEAN DOWN"]
+    hit = sum(r["fwd"] > 0 for r in ind) / len(ind) if ind else None
+    z = (hit - base) / math.sqrt(base * (1 - base) / len(ind)) if ind and 0 < base < 1 else None
+    avg_ind = sum(r["fwd"] for r in ind) / len(ind) if ind else None
     return {
-        "days": n, "baseline_up_rate": round(base, 3), "avg_return_all_days_pct": round(avg_all, 3),
-        "long_signals": len(longs), "long_hit_rate": None if hit is None else round(hit, 3),
-        "avg_return_after_long_pct": None if avg_long is None else round(avg_long, 3),
-        "avg_return_after_long_net_pct": None if avg_long is None else round(avg_long - ROUND_TRIP_COST_PCT, 3),
+        "days": n, "baseline_up_rate": round(base, 3),
+        "avg_return_all_days_pct": round(sum(r["fwd"] for r in rows) / n, 3) if n else 0.0,
+        "long_signals": len(longs), "independent_long": len(ind),
+        "long_hit_rate": None if hit is None else round(hit, 3),
+        "avg_return_after_long_pct": None if avg_ind is None else round(avg_ind, 3),
+        "avg_return_after_long_net_pct": None if avg_ind is None else round(avg_ind - cost, 3),
         "down_signals": len(downs),
         "avg_return_after_down_pct": round(sum(r["fwd"] for r in downs) / len(downs), 3) if downs else None,
         "sat_out": n - len(longs) - len(downs), "z_vs_baseline": None if z is None else round(z, 2),
-        "calibration": _bins([(r["p_up"], int(r["fwd"] > 0)) for r in rows]),
-        "verdict": _verdict(n, len(longs), hit, base, z, avg_long),
+        "cost_pct": cost, "calibration": _bins([(r["p_up"], int(r["fwd"] > 0)) for r in rows]),
+        "verdict": _verdict(len(ind), avg_ind, cost, z),
     }
 
 
-def _verdict(n, n_long, hit, base, z, avg_long) -> str:
-    if n_long < 15:
-        return f"Too few signals ({n_long}) to say anything. Jev mostly sat out, which is not a failure."
-    if z is not None and z >= 2 and avg_long is not None and avg_long - ROUND_TRIP_COST_PCT > 0:
-        return ("Promising, not proof. Signals beat the baseline and survive costs. But days overlap, the sample is small, "
-                "and Jev may have seen this period in training. Only the forward scoreboard counts.")
-    return ("No demonstrated edge here. Signals do not clearly beat simply holding, or do not survive costs.")
+def _verdict(n_ind: int, avg_ind: float | None, cost: float, z: float | None) -> str:
+    if n_ind < MIN_INDEPENDENT:
+        return (f"Too few independent signals ({n_ind}, need {MIN_INDEPENDENT}) to say anything. "
+                "Sitting out most days is not a failure.")
+    if z is not None and z >= 2 and avg_ind is not None and avg_ind - cost > 0:
+        return ("Promising, not proof. Signals beat the baseline and survive costs. But the sample is small and Jev may "
+                "have seen this period in training. Only the forward scoreboard counts.")
+    return "No demonstrated edge here. Signals do not clearly beat simply holding, or do not survive costs."
 
 
-async def backtest(asker, sym: str, h: int, n: int, demo: bool, conc: int = 6) -> dict:
+def compare(jev: dict, rule: dict) -> str:
+    if jev["independent_long"] < MIN_INDEPENDENT:
+        return "Not enough Jev signals to compare against the simple rule."
+    jn, rn = jev["avg_return_after_long_net_pct"], rule["avg_return_after_long_net_pct"]
+    if rule["independent_long"] < MIN_INDEPENDENT or rn is None:
+        return "The simple rule gave too few signals to compare."
+    if jn <= jev["avg_return_all_days_pct"]:
+        return "Jev's signals did not beat simply holding the stock on every day, even before comparing with the rule."
+    if jn > rn and (jev["long_hit_rate"] or 0) > (rule["long_hit_rate"] or 0):
+        return "Jev beat the simple momentum rule on this sample. Check that it holds on other tickers before believing it."
+    return "Jev did not beat the simple momentum rule. If a 3-line rule does as well, Jev adds nothing here."
+
+
+async def backtest(asker, sym: str, h: int, n: int, demo: bool, conc: int = 6, cost: float = ROUND_TRIP_COST_PCT) -> dict:
     bars, source = get_bars(sym, demo)
-    n = max(10, min(n, 150))
+    n = max(10, min(n, 250))
     idx = list(range(max(60, len(bars) - h - n), len(bars) - h))
     sem = asyncio.Semaphore(conc)
 
     async def one(i):
         async with sem:
             try:
-                a = await asker(features(bars[: i + 1]), h)      # data up to day i only
+                snap = features(bars[: i + 1])                    # data up to day i only
+                a = await asker(snap, h)
             except Exception as e:
                 return {"error": repr(e)}
             lab, _ = lean(a)
-            return {"asof": bars[i].d, "lean": lab, "p_up": a["p_up"], "fwd": _fwd(bars, i, h), "model": a["model"]}
+            return {"i": i, "asof": bars[i].d, "lean": lab, "rule_lean": momentum_rule(snap), "p_up": a["p_up"],
+                    "fwd": _fwd(bars, i, h), "model": a["model"]}
 
     res = await asyncio.gather(*(one(i) for i in idx))
     ok = [r for r in res if "error" not in r]
-    out = {"symbol": sym, "h": h, "source": source, "demo": demo, "errors": len(res) - len(ok),
-           "stats": summarize(ok), "rows": ok[-40:],
-           "caveat": "Jev may have seen this price history during training, so this test can look better than reality."}
-    return out
+    jev, rule = summarize(ok, h, cost), summarize(ok, h, cost, key="rule_lean")
+    return {"symbol": sym, "h": h, "source": source, "demo": demo, "errors": len(res) - len(ok), "cost_pct": cost,
+            "stats": jev, "rule_stats": rule, "comparison": compare(jev, rule), "rows": ok[-40:],
+            "caveat": "Jev may have seen this price history during training, so this test can look better than reality."}
+
+
+MAX_WATCHLIST = 25
+
+
+async def scan(asker, symbols: list[str], h: int, demo: bool, log_path: str | None, conc: int = 4) -> dict:
+    """Ask Jev about many tickers. One bad ticker never sinks the rest. Capped to protect your credit."""
+    syms = [s.strip() for s in symbols if s.strip()]
+    truncated = len(syms) > MAX_WATCHLIST
+    syms = syms[:MAX_WATCHLIST]
+    sem = asyncio.Semaphore(conc)
+
+    async def one(raw):
+        async with sem:
+            try:
+                d = await analyze(asker, check_symbol(raw), h, demo, log_path)
+                j = d["jev"]
+                return {"symbol": d["symbol"], "lean": d["lean"], "p_up": j["p_up"], "p_down": j["p_down"],
+                        "entry_score": j["entry_score"], "vol_regime": j["vol_regime"], "close": d["close"],
+                        "asof": d["asof"], "warning": d.get("warning")}
+            except Exception as e:
+                return {"symbol": raw.upper(), "error": str(e) if isinstance(e, ValueError) else f"{type(e).__name__}: {e}"}
+
+    rows = await asyncio.gather(*(one(s) for s in syms))
+    ok = sorted((r for r in rows if "error" not in r), key=lambda r: -r["p_up"])
+    return {"rows": ok + [r for r in rows if "error" in r], "truncated": truncated, "h": h, "demo": demo}
 
 
 def scoreboard(log_path: str, demo: bool = False) -> dict:
@@ -170,14 +228,17 @@ def make_handler(asker, model: str, log_path: str, has_key: bool):
                 if u.path == "/api/status":
                     return self._json({"has_key": has_key, "model": model})
                 demo = q.get("demo") == "1"
-                if u.path in ("/api/analyze", "/api/backtest") and not has_key:
+                if u.path in ("/api/analyze", "/api/backtest", "/api/scan") and not has_key:
                     return self._json({"error": "TYPESAFE_API_KEY is not set on the machine running this app."}, 400)
                 h = max(1, min(int(q.get("h", 5)), 20))
                 if u.path == "/api/analyze":
                     return self._json(asyncio.run(analyze(asker, check_symbol(q.get("symbol", "")), h, demo, log_path)))
                 if u.path == "/api/backtest":
+                    cost = max(0.0, min(float(q.get("cost", ROUND_TRIP_COST_PCT)), 5.0))
                     return self._json(asyncio.run(backtest(asker, check_symbol(q.get("symbol", "")), h,
-                                                           int(q.get("n", 60)), demo)))
+                                                           int(q.get("n", 120)), demo, cost=cost)))
+                if u.path == "/api/scan":
+                    return self._json(asyncio.run(scan(asker, q.get("symbols", "").split(","), h, demo, log_path)))
                 if u.path == "/api/scoreboard":
                     return self._json(scoreboard(log_path, demo))
                 self._send(404, b"not found", "text/plain")

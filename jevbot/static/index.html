@@ -52,13 +52,22 @@ h2{font-size:1.05rem;margin:0 0 8px}
       <div><label for="sym">Ticker</label><input id="sym" type="text" value="AAPL" maxlength="10" autocomplete="off"></div>
       <div><label for="h">Look ahead</label><select id="h"><option value="1">1 day</option><option value="5" selected>5 days</option><option value="10">10 days</option></select></div>
       <button id="go">Ask Jev</button>
-      <button id="bt" class="alt">Test last 60 days</button>
+      <div><label for="n">Test length</label><select id="n"><option value="60">60 days</option><option value="120" selected>120 days</option><option value="250">250 days</option></select></div>
+      <div><label for="cost">Cost per trade %</label><input id="cost" type="text" value="0.10" style="width:70px;text-transform:none"></div>
+      <button id="bt" class="alt">Run past test</button>
       <label class="chk"><input id="demo" type="checkbox"> demo data (fake prices)</label>
     </div>
   </div>
 
   <div id="out"></div>
   <div id="btout"></div>
+
+  <div class="card">
+    <h2>Watchlist scan</h2>
+    <p class="mute" style="margin:0 0 8px">Ask Jev about many tickers at once, strongest first. One ticker proves nothing, so look at the spread. Max 25.</p>
+    <div class="row"><div style="flex:1;min-width:220px"><label for="wl">Tickers, comma separated</label><input id="wl" type="text" style="width:100%;text-transform:uppercase" value="AAPL,MSFT,NVDA,AMZN,GOOGL,META,JPM,XOM,JNJ,WMT"></div><button id="sc">Scan</button></div>
+    <div id="scout" style="margin-top:10px"></div>
+  </div>
 
   <div class="card">
     <h2>Forward scoreboard</h2>
@@ -71,7 +80,7 @@ const $=id=>document.getElementById(id);
 const pct=x=>x==null?'n/a':(x>0?'+':'')+x.toFixed(2)+'%';
 const lab={ 'LEAN UP':['UP','Lean up'],'LEAN DOWN':['DOWN','Lean down'],'SIT OUT':['OUT','Sit out'] };
 async function api(path){const r=await fetch(path);const j=await r.json();if(!r.ok)throw new Error(j.error||r.statusText);return j}
-function busy(on){['go','bt'].forEach(i=>$(i).disabled=on)}
+function busy(on){['go','bt','sc'].forEach(i=>$(i).disabled=on)}
 function bar(name,p,color){return `<div class="bar"><span>${name}</span><div class="track"><div class="fill" style="width:${(p*100).toFixed(0)}%;background:${color}"></div></div><span>${(p*100).toFixed(0)}%</span></div>`}
 function chart(s){
   const v=s.map(x=>x[1]),mn=Math.min(...v),mx=Math.max(...v),W=640,H=170,p=6;
@@ -95,17 +104,18 @@ function render(d){
    <details style="margin-top:10px"><summary class="mute">What Jev was shown</summary>
      <div class="grid" style="margin-top:8px">${keys.map(([k,n])=>`<div class="kv"><b>${f[k]??'n/a'}</b><span>${n}</span></div>`).join('')}</div>
      <p class="mute" style="font-size:.8rem">Model ${j.model} · answered in ${j.latency_ms} ms</p></details></div>`}
-function stats(s,title){
-  const cal=s.calibration.map(b=>`<tr><td>${b.range}</td><td>${b.n}</td><td>${(b.was_up*100).toFixed(0)}%</td></tr>`).join('');
-  return `<h2>${title}</h2><div class="grid">
+function statCells(s){return `<div class="grid">
    <div class="kv"><b>${s.days}</b><span>days judged</span></div>
    <div class="kv"><b>${(s.baseline_up_rate*100).toFixed(0)}%</b><span>of days the price rose anyway</span></div>
-   <div class="kv"><b>${s.long_signals}</b><span>"lean up" calls</span></div>
+   <div class="kv"><b>${s.independent_long}</b><span>independent "lean up" calls (${s.long_signals} counting overlaps)</span></div>
    <div class="kv"><b>${s.long_hit_rate==null?'n/a':(s.long_hit_rate*100).toFixed(0)+'%'}</b><span>of those went up</span></div>
    <div class="kv"><b>${pct(s.avg_return_after_long_pct)}</b><span>avg move after "lean up"</span></div>
-   <div class="kv"><b>${pct(s.avg_return_after_long_net_pct)}</b><span>same, minus 0.10% costs</span></div>
+   <div class="kv"><b>${pct(s.avg_return_after_long_net_pct)}</b><span>same, minus ${s.cost_pct}% costs</span></div>
    <div class="kv"><b>${pct(s.avg_return_all_days_pct)}</b><span>avg move on any day</span></div>
-   <div class="kv"><b>${s.sat_out}</b><span>days it sat out</span></div></div>
+   <div class="kv"><b>${s.sat_out}</b><span>days it sat out</span></div></div>`}
+function stats(s,title){
+  const cal=s.calibration.map(b=>`<tr><td>${b.range}</td><td>${b.n}</td><td>${(b.was_up*100).toFixed(0)}%</td></tr>`).join('');
+  return `<h2>${title}</h2>${statCells(s)}
    <p class="verdict">${s.verdict}</p>
    ${cal?`<table><tr><th>Jev said chance of rise</th><th>days</th><th>actually rose</th></tr>${cal}</table>`:''}`}
 async function ask(){
@@ -113,14 +123,24 @@ async function ask(){
   try{const d=await api(`/api/analyze?symbol=${$('sym').value}&h=${$('h').value}&demo=${$('demo').checked?1:0}`);render(d);loadSb()}
   catch(e){$('out').innerHTML=`<div class="card err">${e.message}</div>`}finally{busy(false)}}
 async function bt(){
-  busy(true);$('btout').innerHTML='<div class="card mute">Running about 60 questions through Jev. Takes under a minute.</div>';
-  try{const d=await api(`/api/backtest?symbol=${$('sym').value}&h=${$('h').value}&n=60&demo=${$('demo').checked?1:0}`);
-    $('btout').innerHTML=`<div class="card">${stats(d.stats,'Past test: '+d.symbol+(d.demo?' (FAKE prices)':''))}<p class="mute" style="font-size:.85rem">${d.caveat}${d.errors?` ${d.errors} questions failed and were skipped.`:''}</p></div>`}
+  busy(true);$('btout').innerHTML=`<div class="card mute">Running about ${$('n').value} questions through Jev. Takes under a minute.</div>`;
+  try{const d=await api(`/api/backtest?symbol=${$('sym').value}&h=${$('h').value}&n=${$('n').value}&cost=${encodeURIComponent($('cost').value)}&demo=${$('demo').checked?1:0}`);
+    $('btout').innerHTML=`<div class="card">${stats(d.stats,'Jev, past test: '+d.symbol+(d.demo?' (FAKE prices)':''))}
+      <h2 style="margin-top:16px">The 3-line momentum rule, same days</h2>${statCells(d.rule_stats)}
+      <p class="verdict">${d.comparison}</p><p class="mute" style="font-size:.85rem">${d.caveat}${d.errors?` ${d.errors} questions failed and were skipped.`:''}</p></div>`}
   catch(e){$('btout').innerHTML=`<div class="card err">${e.message}</div>`}finally{busy(false)}}
 async function loadSb(){
   try{const d=await api('/api/scoreboard');
     $('sb').innerHTML=d.made?`<p>${d.made} reads saved, ${d.pending} still waiting for their look-ahead period to pass.</p>${d.stats?stats(d.stats,'Results so far'):''}`:'No reads saved yet. Ask Jev about a real ticker (demo off) to start the scoreboard.'}
   catch(e){$('sb').innerHTML=`<span class="err">${e.message}</span>`}}
+async function scan(){
+  busy(true);$('scout').innerHTML='<span class="mute">Scanning...</span>';
+  try{const d=await api(`/api/scan?symbols=${encodeURIComponent($('wl').value)}&h=${$('h').value}&demo=${$('demo').checked?1:0}`);
+    const rows=d.rows.map(r=>r.error?`<tr><td>${r.symbol}</td><td colspan="4" class="err">${r.error}</td></tr>`:
+      `<tr><td><b>${r.symbol}</b></td><td class="${lab[r.lean][0]}">${lab[r.lean][1]}</td><td>${(r.p_up*100).toFixed(0)}%</td><td>${(r.p_down*100).toFixed(0)}%</td><td>${r.close} <span class="mute">${r.vol_regime}</span></td></tr>`).join('');
+    $('scout').innerHTML=`<table><tr><th>Ticker</th><th>Jev's lean</th><th>Up</th><th>Down</th><th>Last close</th></tr>${rows}</table>${d.truncated?'<p class="mute">List cut to 25 tickers.</p>':''}`;loadSb()}
+  catch(e){$('scout').innerHTML=`<span class="err">${e.message}</span>`}finally{busy(false)}}
+$('sc').onclick=scan;
 $('go').onclick=ask;$('bt').onclick=bt;$('sym').addEventListener('keydown',e=>{if(e.key==='Enter')ask()});
 api('/api/status').then(s=>{if(!s.has_key){const el=$('status');el.hidden=false;el.textContent='TYPESAFE_API_KEY is not set on this computer, so Jev cannot be asked. Set it and restart the app.'}}).catch(()=>{});
 loadSb();

@@ -43,3 +43,12 @@ def features(bars: list[Bar]) -> dict:
     if len(c) >= 200:
         f["vs_sma200_pct"] = (last / (sum(c[-200:]) / 200) - 1) * 100
     return {k: _sig(v) for k, v in f.items()}
+
+
+def momentum_rule(f: dict) -> str:
+    """The dumb baseline Jev has to beat: trade only when 20-day move and the 50-day average agree."""
+    if f["ret_20d_pct"] > 0 and f["vs_sma50_pct"] > 0:
+        return "LEAN UP" if f["rsi14"] < 75 else "SIT OUT"
+    if f["ret_20d_pct"] < 0 and f["vs_sma50_pct"] < 0:
+        return "LEAN DOWN" if f["rsi14"] > 25 else "SIT OUT"
+    return "SIT OUT"
