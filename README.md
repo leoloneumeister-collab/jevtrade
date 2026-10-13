@@ -43,3 +43,19 @@ jevbot --config config.polymarket.toml run --feed replay --replay runs/raw.jsonl
 - Paper fills assume half of each print reaches you (`queue_factor`). Real queue position is unknown, so treat paper
   profit as an upper bound.
 - Binary markets pay 0 or 1 at resolution. The picker avoids prices near 0/1 and markets ending within 7 days.
+
+## Stock website (runs on YOUR computer)
+```
+pip install -e ".[dev]"
+export TYPESAFE_API_KEY=...        # stays on your machine, never sent to the browser
+jevbot web                         # then open http://127.0.0.1:8000
+```
+- **Ask Jev:** a ticker, a look-ahead (1/5/10 days). Jev answers 5 narrow questions about the stock; strict code rules turn
+  them into LEAN UP / LEAN DOWN / SIT OUT. Most days should be SIT OUT.
+- **Test last 60 days:** replays history day by day (Jev only sees data up to each day) and compares its calls with what
+  happened, against the plain baseline of "price rose anyway". Caveat: Jev may have seen that period in training.
+- **Forward scoreboard:** every real read is saved to `runs/predictions.jsonl` and checked after the look-ahead passes.
+  This is the only test that cannot be fooled by old data. Give it weeks before believing anything.
+- Prices come from Yahoo (unofficial) then Stooq, both free and keyless. Not tested live from the build sandbox
+  (it blocks them). The "demo data" box uses fake prices so the page works offline.
+- Paper only: the app has no broker connection and cannot place orders.
