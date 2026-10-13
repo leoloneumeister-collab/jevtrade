@@ -1,5 +1,12 @@
 # jevbot
 
+**Start here (Mac/Linux):** `git pull && ./start.sh`. It installs everything, asks for your TypeSafe key and opens the
+stock page. See `docs/ARCHITECTURE.md` for how it works and `docs/LIMITATIONS.md` for what it can NOT tell you.
+Quality gate for contributors: `make check` (ruff, mypy, pytest). CI runs the same on Python 3.11 and 3.13.
+
+---
+
+
 Paper-trading market maker. Jev judges the state, code decides, the risk engine vetoes.
 **There is no real-money venue in this repo on purpose.**
 
