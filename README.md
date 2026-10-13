@@ -45,6 +45,8 @@ jevbot --config config.polymarket.toml run --feed replay --replay runs/raw.jsonl
 - Binary markets pay 0 or 1 at resolution. The picker avoids prices near 0/1 and markets ending within 7 days.
 
 ## Stock website (runs on YOUR computer)
+Mac/Linux, easiest: `./start.sh` (finds Python 3.11+, installs everything, asks for your key, starts the app).
+Manual way:
 ```
 pip install -e ".[dev]"
 export TYPESAFE_API_KEY=...        # stays on your machine, never sent to the browser
