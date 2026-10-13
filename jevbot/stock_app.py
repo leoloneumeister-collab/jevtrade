@@ -11,6 +11,8 @@ import io
 import json
 import math
 import os
+import re
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -205,7 +207,7 @@ async def scan(asker, symbols: list[str], h: int, demo: bool, log_path: str | No
                         "entry_score": j["entry_score"], "vol_regime": j["vol_regime"], "close": d["close"],
                         "asof": d["asof"], "warning": d.get("warning")}
             except Exception as e:
-                return {"symbol": raw.upper(), "error": friendly_error(e)}
+                return {"symbol": re.sub(r"[^A-Z0-9.\-]", "?", raw.upper())[:12], "error": friendly_error(e)}
 
     rows = await asyncio.gather(*(one(s) for s in syms))
     ok = sorted((r for r in rows if "error" not in r), key=lambda r: -r["p_up"])
@@ -255,7 +257,38 @@ def scoreboard_csv(log_path: str, demo: bool = False) -> str:
 
 
 # ---------------------------------------------------------------------------
-def make_handler(asker, model: str, log_path: str, has_key: bool):
+class RateLimiter:
+    """Sliding window. Keeps a runaway page or script from spending your Jev credit."""
+
+    def __init__(self, limit: int, window: float, clock=time.monotonic):
+        self.limit, self.window, self.clock = limit, window, clock
+        self.hits: list[float] = []
+        self.lock = threading.Lock()
+
+    def allow(self) -> bool:
+        with self.lock:
+            now = self.clock()
+            self.hits = [t for t in self.hits if now - t < self.window]
+            if len(self.hits) >= self.limit:
+                return False
+            self.hits.append(now)
+            return True
+
+
+EXPENSIVE = ("/api/analyze", "/api/backtest", "/api/scan")          # these spend Jev credit
+PUBLIC_FILES = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                "/app.css": ("app.css", "text/css; charset=utf-8")}
+SECURITY_HEADERS = {
+    "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
+    "Cache-Control": "no-store",
+}
+MAX_QUERY_VALUE = 400
+
+
+def make_handler(asker, model: str, log_path: str, has_key: bool, rate_limit: tuple[int, float] = (60, 60.0)):
+    limiter = RateLimiter(*rate_limit)
+
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
@@ -263,42 +296,66 @@ def make_handler(asker, model: str, log_path: str, has_key: bool):
         def _send(self, code: int, body: bytes, ctype: str, extra: dict | None = None):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
-            for k, v in (extra or {}).items():
+            for k, v in {**SECURITY_HEADERS, **(extra or {})}.items():
                 self.send_header(k, v)
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
 
         def _json(self, obj, code=200):
             self._send(code, json.dumps(obj).encode(), "application/json")
 
+        def _allowed_hosts(self) -> set[str]:
+            port = self.server.server_address[1]
+            return {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
+
+        def _guard(self, path: str) -> bool:
+            """Reject DNS rebinding (bad Host), cross-site pages (bad Origin) and header-less API calls."""
+            if self.headers.get("Host", "") not in self._allowed_hosts():
+                self._json({"error": "Forbidden host."}, 403)
+                return False
+            origin = self.headers.get("Origin")
+            if origin is not None and origin.removeprefix("http://") not in self._allowed_hosts():
+                self._json({"error": "Forbidden origin."}, 403)
+                return False
+            if path.startswith("/api/") and path != "/api/scoreboard.csv" and self.headers.get("X-Jevbot") != "1":
+                self._json({"error": "Missing X-Jevbot header."}, 403)
+                return False
+            return True
+
         def do_GET(self):
             u = urlparse(self.path)
+            if not self._guard(u.path):
+                return
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             try:
-                if u.path == "/":
-                    return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
+                if any(len(v) > MAX_QUERY_VALUE for v in q.values()):
+                    raise ValueError("That request is too long.")
+                if u.path in PUBLIC_FILES:
+                    name, ctype = PUBLIC_FILES[u.path]
+                    return self._send(200, (STATIC / name).read_bytes(), ctype)
                 if u.path == "/favicon.ico":
                     return self._send(204, b"", "image/x-icon")
                 if u.path == "/api/status":
                     return self._json({"has_key": has_key, "model": model})
-                demo = q.get("demo") == "1"
-                if u.path in ("/api/analyze", "/api/backtest", "/api/scan") and not has_key:
-                    return self._json({"error": "TYPESAFE_API_KEY is not set on the machine running this app."}, 400)
-                h = max(1, min(int(q.get("h", 5)), 20))
-                if u.path == "/api/analyze":
-                    return self._json(asyncio.run(analyze(asker, check_symbol(q.get("symbol", "")), h, demo, log_path)))
-                if u.path == "/api/backtest":
-                    cost = max(0.0, min(float(q.get("cost", ROUND_TRIP_COST_PCT)), 5.0))
-                    return self._json(asyncio.run(backtest(asker, check_symbol(q.get("symbol", "")), h,
-                                                           int(q.get("n", 120)), demo, cost=cost)))
-                if u.path == "/api/scan":
-                    return self._json(asyncio.run(scan(asker, q.get("symbols", "").split(","), h, demo, log_path)))
                 if u.path == "/api/scoreboard.csv":
-                    return self._send(200, scoreboard_csv(log_path, demo).encode(), "text/csv; charset=utf-8",
+                    return self._send(200, scoreboard_csv(log_path, q.get("demo") == "1").encode(), "text/csv; charset=utf-8",
                                       {"Content-Disposition": 'attachment; filename="jev_scoreboard.csv"'})
                 if u.path == "/api/scoreboard":
-                    return self._json(scoreboard(log_path, demo))
+                    return self._json(scoreboard(log_path, q.get("demo") == "1"))
+                if u.path in EXPENSIVE:
+                    if not has_key:
+                        return self._json({"error": "TYPESAFE_API_KEY is not set on the machine running this app."}, 400)
+                    if not limiter.allow():
+                        return self._json({"error": "Too many requests. Wait a minute."}, 429)
+                    demo, h = q.get("demo") == "1", max(1, min(int(q.get("h", 5)), 20))
+                    if u.path == "/api/analyze":
+                        return self._json(asyncio.run(analyze(asker, check_symbol(q.get("symbol", "")), h, demo, log_path)))
+                    if u.path == "/api/backtest":
+                        cost = max(0.0, min(float(q.get("cost", ROUND_TRIP_COST_PCT)), 5.0))
+                        return self._json(asyncio.run(backtest(asker, check_symbol(q.get("symbol", "")), h,
+                                                               int(q.get("n", 120)), demo, cost=cost)))
+                    return self._json(asyncio.run(scan(asker, q.get("symbols", "").split(","), h, demo, log_path)))
                 self._send(404, b"not found", "text/plain")
             except ValueError as e:
                 self._json({"error": friendly_error(e)}, 400)
@@ -306,9 +363,6 @@ def make_handler(asker, model: str, log_path: str, has_key: bool):
                 self._json({"error": friendly_error(e)}, 502)
 
     return H
-
-
-DEFAULT_MODEL = "jev-1.13.0"
 
 
 def make_asker(model: str):

@@ -4,41 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jev Stock Check</title>
-<style>
-:root{--bg:#f6f7f9;--card:#fff;--ink:#14171c;--mute:#5c6573;--line:#e3e6ea;--up:#127a4b;--down:#b3261e;--flat:#6b7280;--accent:#2457d6;--warn:#8a5a00;--warnbg:#fff4d6}
-@media (prefers-color-scheme:dark){:root{--bg:#0e1116;--card:#171b22;--ink:#e8ebf0;--mute:#98a1ae;--line:#272d37;--up:#3ecf8e;--down:#ff6b61;--flat:#9aa3b0;--accent:#7aa2ff;--warn:#f3c969;--warnbg:#2b2312}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-main{max-width:920px;margin:0 auto;padding:20px 16px 64px}
-h1{font-size:1.5rem;margin:0 0 4px}
-.sub{color:var(--mute);margin:0 0 16px}
-.warn{background:var(--warnbg);color:var(--warn);border-radius:10px;padding:10px 14px;margin:0 0 16px;font-size:.92rem}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:0 0 16px}
-.row{display:flex;flex-wrap:wrap;gap:10px;align-items:end}
-label{display:block;font-size:.8rem;color:var(--mute);margin-bottom:4px}
-input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-width:0}
-input[type=text]{width:130px;text-transform:uppercase}
-button{font:inherit;border:0;border-radius:8px;padding:10px 14px;cursor:pointer;background:var(--accent);color:#fff}
-button.alt{background:transparent;color:var(--accent);border:1px solid var(--accent)}
-button:disabled{opacity:.5;cursor:wait}
-.chk{display:flex;gap:6px;align-items:center;font-size:.9rem;color:var(--mute);padding-bottom:10px}
-.lean{font-size:2rem;font-weight:700;letter-spacing:.02em}
-.UP{color:var(--up)}.DOWN{color:var(--down)}.OUT{color:var(--flat)}
-.mute{color:var(--mute)}
-.bars{display:grid;gap:8px;margin:12px 0}
-.bar{display:grid;grid-template-columns:52px 1fr 46px;gap:8px;align-items:center;font-size:.9rem}
-.track{height:10px;background:var(--line);border-radius:6px;overflow:hidden}
-.fill{height:100%}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-.kv{border:1px solid var(--line);border-radius:10px;padding:8px 10px}
-.kv b{display:block;font-size:1.05rem}.kv span{font-size:.78rem;color:var(--mute)}
-table{width:100%;border-collapse:collapse;font-size:.88rem}
-th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
-svg{width:100%;height:auto;display:block}
-.err{color:var(--down)}
-.verdict{font-weight:600;margin-top:10px}
-h2{font-size:1.05rem;margin:0 0 8px}
-</style>
+<link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <main>
@@ -53,7 +19,7 @@ h2{font-size:1.05rem;margin:0 0 8px}
       <div><label for="h">Look ahead</label><select id="h"><option value="1">1 day</option><option value="5" selected>5 days</option><option value="10">10 days</option></select></div>
       <button id="go">Ask Jev</button>
       <div><label for="n">Test length</label><select id="n"><option value="60">60 days</option><option value="120" selected>120 days</option><option value="250">250 days</option></select></div>
-      <div><label for="cost">Cost per trade %</label><input id="cost" type="text" value="0.10" style="width:70px;text-transform:none"></div>
+      <div><label for="cost">Cost per trade %</label><input id="cost" type="text" value="0.10" class="w70"></div>
       <button id="bt" class="alt">Run past test</button>
       <label class="chk"><input id="demo" type="checkbox"> demo data (fake prices)</label>
     </div>
@@ -64,87 +30,18 @@ h2{font-size:1.05rem;margin:0 0 8px}
 
   <div class="card">
     <h2>Watchlist scan</h2>
-    <p class="mute" style="margin:0 0 8px">Ask Jev about many tickers at once, strongest first. One ticker proves nothing, so look at the spread. Max 25.</p>
-    <div class="row"><div style="flex:1;min-width:220px"><label for="wl">Tickers, comma separated</label><input id="wl" type="text" style="width:100%;text-transform:uppercase" value="AAPL,MSFT,NVDA,AMZN,GOOGL,META,JPM,XOM,JNJ,WMT"></div><button id="sc">Scan</button></div>
-    <div id="scout" style="margin-top:10px"></div>
+    <p class="mute mb8">Ask Jev about many tickers at once, strongest first. One ticker proves nothing, so look at the spread. Max 25.</p>
+    <div class="row"><div class="grow"><label for="wl">Tickers, comma separated</label><input id="wl" type="text" class="wfull" value="AAPL,MSFT,NVDA,AMZN,GOOGL,META,JPM,XOM,JNJ,WMT"></div><button id="sc">Scan</button></div>
+    <div id="scout" class="mt10"></div>
   </div>
 
   <div class="card">
     <h2>Forward scoreboard</h2>
-    <p class="mute" style="margin:0 0 8px">Every real (non-demo) read is saved. After the look-ahead period passes, it is checked against what the price did. This is the only test that cannot be fooled by old data.</p>
+    <p class="mute mb8">Every real (non-demo) read is saved. After the look-ahead period passes, it is checked against what the price did. This is the only test that cannot be fooled by old data.</p>
     <div id="sb">Loading...</div>
-    <p style="margin:8px 0 0"><a href="/api/scoreboard.csv" download>Download all reads as CSV</a></p>
+    <p class="mt8"><a href="/api/scoreboard.csv" download>Download all reads as CSV</a></p>
   </div>
 </main>
-<script>
-const $=id=>document.getElementById(id);
-const pct=x=>x==null?'n/a':(x>0?'+':'')+x.toFixed(2)+'%';
-const lab={ 'LEAN UP':['UP','Lean up'],'LEAN DOWN':['DOWN','Lean down'],'SIT OUT':['OUT','Sit out'] };
-async function api(path){const r=await fetch(path);const j=await r.json();if(!r.ok)throw new Error(j.error||r.statusText);return j}
-function busy(on){['go','bt','sc'].forEach(i=>$(i).disabled=on)}
-function bar(name,p,color){return `<div class="bar"><span>${name}</span><div class="track"><div class="fill" style="width:${(p*100).toFixed(0)}%;background:${color}"></div></div><span>${(p*100).toFixed(0)}%</span></div>`}
-function chart(s){
-  const v=s.map(x=>x[1]),mn=Math.min(...v),mx=Math.max(...v),W=640,H=170,p=6;
-  const pts=v.map((y,i)=>`${(p+i*(W-2*p)/(v.length-1)).toFixed(1)},${(H-p-(y-mn)/(mx-mn||1)*(H-2*p)).toFixed(1)}`).join(' ');
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Closing price, last ${v.length} days"><polyline fill="none" stroke="var(--accent)" stroke-width="2" points="${pts}"/></svg>
-  <div class="mute" style="font-size:.8rem;display:flex;justify-content:space-between"><span>${s[0][0]}</span><span>low ${mn.toFixed(2)} / high ${mx.toFixed(2)}</span><span>${s[s.length-1][0]}</span></div>`}
-function render(d){
-  const [cls,txt]=lab[d.lean],j=d.jev,f=d.features;
-  const keys=[['ret_5d_pct','5 day move %'],['ret_20d_pct','20 day move %'],['rsi14','RSI (14)'],['vs_sma50_pct','vs 50 day avg %'],['vol_20d_pct','daily swing %'],['pos_in_52w_range','52 week range (0-1)']];
-  $('out').innerHTML=`<div class="card">
-   <div class="mute">${d.symbol} closed at ${d.close} on ${d.asof} · ${d.h} day look ahead · data: ${d.source}${d.demo?' (FAKE)':''}</div>
-   <div class="lean ${cls}">${txt}</div><div>${d.why}</div>${d.warning?`<div class="warn" style="margin:10px 0 0">${d.warning}</div>`:''}
-   <div class="bars">${bar('Up',j.p_up,'var(--up)')}${bar('Flat',j.p_flat,'var(--flat)')}${bar('Down',j.p_down,'var(--down)')}</div>
-   <div class="grid">
-     <div class="kv"><b>${(j.uptrend*100).toFixed(0)}%</b><span>chance it is in an uptrend</span></div>
-     <div class="kv"><b>${(j.overextended*100).toFixed(0)}%</b><span>chance it is overextended</span></div>
-     <div class="kv"><b>${j.vol_regime}</b><span>how jumpy (${(j.vol_conf*100).toFixed(0)}% sure)</span></div>
-     <div class="kv"><b>${j.entry_score.toFixed(1)} / 3</b><span>setup quality (${(j.entry_conf*100).toFixed(0)}% sure)</span></div>
-   </div>
-   <div style="margin-top:14px">${chart(d.series)}</div>
-   <details style="margin-top:10px"><summary class="mute">What Jev was shown</summary>
-     <div class="grid" style="margin-top:8px">${keys.map(([k,n])=>`<div class="kv"><b>${f[k]??'n/a'}</b><span>${n}</span></div>`).join('')}</div>
-     <p class="mute" style="font-size:.8rem">Model ${j.model} · answered in ${j.latency_ms} ms</p></details></div>`}
-function statCells(s){return `<div class="grid">
-   <div class="kv"><b>${s.days}</b><span>days judged</span></div>
-   <div class="kv"><b>${(s.baseline_up_rate*100).toFixed(0)}%</b><span>of days the price rose anyway</span></div>
-   <div class="kv"><b>${s.independent_long}</b><span>independent "lean up" calls (${s.long_signals} counting overlaps)</span></div>
-   <div class="kv"><b>${s.long_hit_rate==null?'n/a':(s.long_hit_rate*100).toFixed(0)+'%'}</b><span>of those went up</span></div>
-   <div class="kv"><b>${pct(s.avg_return_after_long_pct)}</b><span>avg move after "lean up"</span></div>
-   <div class="kv"><b>${pct(s.avg_return_after_long_net_pct)}</b><span>same, minus ${s.cost_pct}% costs</span></div>
-   <div class="kv"><b>${pct(s.avg_return_all_days_pct)}</b><span>avg move on any day</span></div>
-   <div class="kv"><b>${s.sat_out}</b><span>days it sat out</span></div></div>`}
-function stats(s,title){
-  const cal=s.calibration.map(b=>`<tr><td>${b.range}</td><td>${b.n}</td><td>${(b.was_up*100).toFixed(0)}%</td></tr>`).join('');
-  return `<h2>${title}</h2>${statCells(s)}
-   <p class="verdict">${s.verdict}</p>
-   ${cal?`<table><tr><th>Jev said chance of rise</th><th>days</th><th>actually rose</th></tr>${cal}</table>`:''}`}
-async function ask(){
-  busy(true);$('btout').innerHTML='';$('out').innerHTML='<div class="card mute">Asking Jev...</div>';
-  try{const d=await api(`/api/analyze?symbol=${$('sym').value}&h=${$('h').value}&demo=${$('demo').checked?1:0}`);render(d);loadSb()}
-  catch(e){$('out').innerHTML=`<div class="card err">${e.message}</div>`}finally{busy(false)}}
-async function bt(){
-  busy(true);$('btout').innerHTML=`<div class="card mute">Running about ${$('n').value} questions through Jev. Takes under a minute.</div>`;
-  try{const d=await api(`/api/backtest?symbol=${$('sym').value}&h=${$('h').value}&n=${$('n').value}&cost=${encodeURIComponent($('cost').value)}&demo=${$('demo').checked?1:0}`);
-    $('btout').innerHTML=`<div class="card">${stats(d.stats,'Jev, past test: '+d.symbol+(d.demo?' (FAKE prices)':''))}
-      <h2 style="margin-top:16px">The 3-line momentum rule, same days</h2>${statCells(d.rule_stats)}
-      <p class="verdict">${d.comparison}</p><p class="mute" style="font-size:.85rem">${d.caveat}${d.errors?` ${d.errors} questions failed and were skipped.`:''}</p></div>`}
-  catch(e){$('btout').innerHTML=`<div class="card err">${e.message}</div>`}finally{busy(false)}}
-async function loadSb(){
-  try{const d=await api('/api/scoreboard');
-    $('sb').innerHTML=d.made?`<p>${d.made} reads saved, ${d.pending} still waiting for their look-ahead period to pass.</p>${d.stats?stats(d.stats,'Results so far'):''}`:'No reads saved yet. Ask Jev about a real ticker (demo off) to start the scoreboard.'}
-  catch(e){$('sb').innerHTML=`<span class="err">${e.message}</span>`}}
-async function scan(){
-  busy(true);$('scout').innerHTML='<span class="mute">Scanning...</span>';
-  try{const d=await api(`/api/scan?symbols=${encodeURIComponent($('wl').value)}&h=${$('h').value}&demo=${$('demo').checked?1:0}`);
-    const rows=d.rows.map(r=>r.error?`<tr><td>${r.symbol}</td><td colspan="4" class="err">${r.error}</td></tr>`:
-      `<tr><td><b>${r.symbol}</b></td><td class="${lab[r.lean][0]}">${lab[r.lean][1]}</td><td>${(r.p_up*100).toFixed(0)}%</td><td>${(r.p_down*100).toFixed(0)}%</td><td>${r.close} <span class="mute">${r.vol_regime}</span></td></tr>`).join('');
-    $('scout').innerHTML=`<table><tr><th>Ticker</th><th>Jev's lean</th><th>Up</th><th>Down</th><th>Last close</th></tr>${rows}</table>${d.truncated?'<p class="mute">List cut to 25 tickers.</p>':''}`;loadSb()}
-  catch(e){$('scout').innerHTML=`<span class="err">${e.message}</span>`}finally{busy(false)}}
-$('sc').onclick=scan;
-$('go').onclick=ask;$('bt').onclick=bt;$('sym').addEventListener('keydown',e=>{if(e.key==='Enter')ask()});
-api('/api/status').then(s=>{if(!s.has_key){const el=$('status');el.hidden=false;el.textContent='TYPESAFE_API_KEY is not set on this computer, so Jev cannot be asked. Set it and restart the app.'}}).catch(()=>{});
-loadSb();
-</script>
+<script src="/app.js" defer></script>
 </body>
 </html>
