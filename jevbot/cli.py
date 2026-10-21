@@ -174,6 +174,39 @@ def cmd_cross(a, cfg: Config) -> None:
     print(f"\nVerdict: {r['verdict']}\n{r['caveat']}")
 
 
+def cmd_forward(a, cfg: Config) -> None:
+    """The clean test: the ranking test on reads made in real time (from `jevbot scan`), judged after the fact."""
+    from . import cross
+
+    r = cross.forward_cross(a.log, a.cost)
+    if not r["made"]:
+        sys.exit(f"No reads in {a.log} yet. Run `jevbot scan` on live data first (see docs/SCHEDULE.md).")
+    print(
+        f"{r['made']} reads saved, {r['pending']} still waiting for their look-ahead to pass"
+        + (f", {r['missing_mom']} older reads have no momentum score" if r["missing_mom"] else "")
+    )
+    if not r["horizons"]:
+        print("Nothing has matured yet. Check back after the look-ahead period.")
+    for g in r["horizons"].values():
+        j, m = g["jev"], g["momentum"]
+        print(
+            f"\n--- look-ahead {g['h']} days: {g['n_stocks']} stocks, {j['dates']} days "
+            f"({g['first_date']} to {g['last_date']}), {j['independent_dates']} independent"
+        )
+        print(f"{'':26}{'Jev':>9}{'momentum':>10}")
+        for label, k in (
+            ("rank link (IC)", "ic_mean"),
+            ("IC t-stat", "ic_t"),
+            ("top 20% - bottom 20%", "spread_mean_pct"),
+            ("  same, after costs", "spread_net_pct"),
+        ):
+            f = lambda v: "n/a" if v is None else f"{v:+.3f}"  # noqa: E731
+            print(f"{label:<26}{f(j[k]):>9}{f(m[k]):>10}")
+        if j["quintiles"]:
+            print("  Jev quintiles Q1..Q5: " + "  ".join(f"{v:+.2f}%" for v in j["quintiles"]))
+        print(f"Verdict: {g['verdict']}\nStop rule: {g['stop_rule']}")
+
+
 def cmd_import_csv(a, cfg: Config) -> None:
     from .market_data import import_csv
 
@@ -263,6 +296,10 @@ def main() -> None:
     cr.add_argument("--cost", type=float, default=0.10)
     cr.add_argument("--skip", type=int, default=0)
     cr.set_defaults(fn=cmd_cross)
+    fw = sub.add_parser("forward", help="ranking test on live reads saved by `jevbot scan` (the clean test)")
+    fw.add_argument("--log", default="runs/predictions.jsonl")
+    fw.add_argument("--cost", type=float, default=0.10)
+    fw.set_defaults(fn=cmd_forward)
     ic = sub.add_parser("import-csv", help="add a downloaded price CSV (Yahoo, Stooq, ...) to data/")
     ic.add_argument("file")
     ic.add_argument("--symbol", required=True)

@@ -46,3 +46,14 @@ launchd runs missed jobs when the Mac wakes.
 ## 3. Read the results
 Open `jevbot web`, look at "Forward scoreboard", or download the CSV. Give it at least 4 weeks and 10 tickers
 before believing anything. The page refuses to call a verdict with fewer than 10 independent signals.
+
+## 4. Judge it with the clean test
+```
+jevbot forward
+```
+This runs the cross-stock ranking test on the reads your scan saved, judged after their look-ahead passed. It also
+shows the momentum benchmark (recorded with every read from now on). Use 30+ stocks and a 1-day horizon
+(`jevbot scan --h 1 --symbols ...`): one independent day per trading day, so 60 days is about 3 months.
+
+**Stop rule, written before any data exists:** if after 60 independent days the Jev rank-link t-stat is below 1, stop.
+Real money needs t of 2 or more, a positive spread after costs, and a better rank link than momentum.

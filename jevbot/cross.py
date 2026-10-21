@@ -13,7 +13,7 @@ import zlib
 
 from .errors import friendly_error
 from .market_data import Bar, check_symbol
-from .stock_app import _ranks, get_bars, norm_src
+from .stock_app import _ranks, _read_log, _resolve, get_bars, norm_src
 from .stock_features import features
 
 MIN_STOCKS = 5  # per day; fewer and "top fifth vs bottom fifth" means nothing
@@ -197,4 +197,47 @@ async def cross_test(asker, symbols: list[str], h: int, n: int, demo, cost: floa
         "verdict": cross_verdict(jev, mom),
         "caveat": "Jev may have seen this price history during training, so a good result here can be flattering. "
         "A bad result is more trustworthy than a good one.",
+    }
+
+
+STOP_RULE = (
+    "Stop rule, written in advance: if after 60 independent days the Jev rank-link t-stat is below 1, stop. "
+    "Real money needs t of 2 or more, a positive spread after costs, and a better rank link than momentum."
+)
+
+
+def forward_cross(log_path: str, cost: float = 0.10) -> dict:
+    """The clean test: apply the cross-stock ranking test to reads made in real time and judged after the fact.
+    Horizons are never mixed. Reads logged before momentum was recorded are counted and left out of the benchmark."""
+    preds = _read_log(log_path)
+    res = _resolve(preds)
+    done = [r for r in res if r["fwd"] is not None]
+    by_h: dict[int, list[dict]] = {}
+    for r in done:
+        by_h.setdefault(r["h"], []).append(r)
+    horizons: dict[str, dict] = {}
+    for h, rs in sorted(by_h.items()):
+        by_date: dict[str, list[dict]] = {}
+        for r in rs:
+            by_date.setdefault(r["asof"], []).append(
+                {"symbol": r["symbol"], "p_up": r["p_up"], "mom": r.get("mom"), "fwd": r["fwd"]}
+            )
+        mom_rows = {d: [x for x in rows if x["mom"] is not None] for d, rows in by_date.items()}
+        jev, mom = cross_stats(by_date, h, cost, "p_up"), cross_stats(mom_rows, h, cost, "mom")
+        usable = sorted(d for d, rows in by_date.items() if len(rows) >= MIN_STOCKS)
+        horizons[str(h)] = {
+            "h": h,
+            "n_stocks": len({r["symbol"] for r in rs}),
+            "first_date": usable[0] if usable else None,
+            "last_date": usable[-1] if usable else None,
+            "jev": jev,
+            "momentum": mom,
+            "verdict": cross_verdict(jev, mom) if usable else "Not enough reads yet: need 5+ stocks on the same day.",
+            "stop_rule": STOP_RULE,
+        }
+    return {
+        "made": len(preds),
+        "pending": len(res) - len(done),
+        "missing_mom": sum(1 for r in done if "mom" not in r),
+        "horizons": horizons,
     }

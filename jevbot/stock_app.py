@@ -104,6 +104,7 @@ def _log_read(log_path: str, out: dict, a: dict, label: str) -> bool:
                     "asof": out["asof"],
                     "close": out["close"],
                     "h": out["h"],
+                    "mom": out["features"]["ret_20d_pct"],
                     "lean": label,
                     "p_up": a["p_up"],
                     "p_down": a["p_down"],
@@ -544,6 +545,10 @@ def make_handler(asker, model: str, log_path: str, has_key: bool, rate_limit: tu
                         "text/csv; charset=utf-8",
                         {"Content-Disposition": 'attachment; filename="jev_scoreboard.csv"'},
                     )
+                if u.path == "/api/forward":
+                    from . import cross
+
+                    return self._json(cross.forward_cross(log_path))
                 if u.path == "/api/scoreboard":
                     return self._json(scoreboard(log_path, q.get("demo") == "1"))
                 if u.path in EXPENSIVE:

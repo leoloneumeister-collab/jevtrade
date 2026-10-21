@@ -96,3 +96,12 @@ async function cross(){
     paintBars($('xout'))}
   catch(e){$('xout').innerHTML=`<span class="err">${esc(e.message)}</span>`}finally{busy(false)}}
 $('xt').onclick=cross;
+
+async function loadForward(){
+  try{const r=await api('/api/forward');const gs=Object.values(r.horizons);
+    $('fwd').innerHTML=!gs.length?'<span class="mute">No matured live reads yet. The ranking test appears here after the first look-ahead period passes.</span>':
+      gs.map(g=>`<div class="mute small">Look-ahead ${esc(g.h)} days: ${g.n_stocks} stocks, ${g.jev.dates} days (${esc(g.first_date)} to ${esc(g.last_date)}), ${g.jev.independent_dates} independent</div>
+        ${xTable(g)}${xBars('Jev',g.jev.quintiles)}<p class="verdict">${esc(g.verdict)}</p><p class="mute small2">${esc(g.stop_rule)}</p>`).join('');
+    paintBars($('fwd'))}
+  catch(e){$('fwd').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+loadForward();
