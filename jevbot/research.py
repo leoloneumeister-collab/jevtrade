@@ -49,7 +49,7 @@ def risk_veto(day: dict[str, dict], mult: float = 2.5) -> set[str]:
 
 # ---- data ----------------------------------------------------------------------------------------
 def build_panel(symbols: list[str], src, h: int = 5) -> list[dict]:
-    rows = []
+    rows: list[dict] = []
     for s in symbols:
         bars = get_bars(s, src)[0]
         for i in range(60, len(bars) - h):
