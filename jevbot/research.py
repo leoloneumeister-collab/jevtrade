@@ -61,7 +61,7 @@ def build_panel(symbols: list[str], src, h: int = 5) -> list[dict]:
                     "fwd": (bars[i + h].c / bars[i].c - 1) * 100,
                 }
             )
-    dates = sorted({r["date"] for r in rows})
+    dates = sorted({str(r["date"]) for r in rows})
     di = {d: k for k, d in enumerate(dates)}
     for r in rows:
         r["di"] = di[r["date"]]
@@ -104,7 +104,7 @@ def _ic(scores: dict[str, dict[str, float]], fwd: dict) -> list[float]:
 
 
 def walk_forward(rows: list[dict], h: int = 5, model: str = "ridge", names: list[str] | None = None, _spy=None) -> dict:
-    """Train on all earlier years (minus a purge gap of h days), score the next year. Never sees the test year's labels."""
+    """Train on earlier years (minus a purge gap of h days), score the next year. Never sees test labels."""
     from sklearn.ensemble import HistGradientBoostingRegressor
     from sklearn.linear_model import Ridge
 
