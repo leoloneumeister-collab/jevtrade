@@ -34,3 +34,20 @@ in training, which would normally flatter it. It still did not work.
 - The forward scoreboard (reads made today, judged later) is still the only clean test and has not run long enough.
 
 Reproduce: import CSVs with `jevbot import-csv`, then `jevbot cross --src file --h 5 --n 150 --skip 0`.
+
+## 3. Trained models, specialist desks and a paper portfolio (2026-11-06)
+36 large US stocks, 2009 to 2015. Walk-forward: each year is predicted by a model trained only on earlier years,
+with a purge gap. Long-only top fifth, rebalanced weekly (262 rebalances), 0.10% cost per side, risk officer vetoes
+stocks swinging over 2.5x the median. Holding all 36 stocks returned **+120.7%** over the test years.
+
+| Desk | Out-of-sample IC | Total | Excess per week (t) | Max drawdown |
+|---|---|---|---|---|
+| Ridge model | +0.002 | +84.4% | -0.056% (-0.79) | -25.8% |
+| Boosted trees | +0.006 | +106.6% | -0.013% (-0.19) | -21.5% |
+| Committee (learned weights) | +0.011 | +102.1% | -0.022% (-0.35) | -20.7% |
+| Trend desk | +0.004 | +72.5% | -0.092% (-1.68) | -21.5% |
+| Reversion desk | +0.007 | +65.7% | -0.104% (-1.76) | -21.3% |
+| Low-volatility desk | -0.017 | +82.5% | -0.080% (-1.21) | **-8.3%** |
+
+**No desk beat simply holding everything.** The low-volatility desk earned less but with a third of the drawdown,
+which is a risk preference, not an edge. Reproduce: `jevbot research --src file`.

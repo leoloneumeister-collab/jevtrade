@@ -207,6 +207,26 @@ def cmd_forward(a, cfg: Config) -> None:
         print(f"Verdict: {g['verdict']}\nStop rule: {g['stop_rule']}")
 
 
+def cmd_research(a, cfg: Config) -> None:
+    """Walk-forward trained models + specialist desks + risk officer, paper traded against holding everything."""
+    from . import research
+    from .market_data import file_symbols
+
+    syms = a.symbols.split(",") if a.symbols else file_symbols()
+    out = research.run_research(syms, a.src, a.h, a.cost)
+    print(
+        f"{out['symbols']} stocks, test years {out['test_years']}, {out['rebalances']} rebalances; "
+        f"holding everything: {out['benchmark']['total_pct']:+.1f}%"
+    )
+    for n in ("ridge", "boost", "committee", "trend", "reversion", "low_vol"):
+        p = out[n]["paper"]
+        print(
+            f"{n:10} IC {out[n]['oos_ic_mean']:+.4f}  total {p['strategy_total_pct']:+7.1f}%  "
+            f"excess/period {p['excess_per_period_pct']:+.3f}% (t={p['excess_t']})  maxDD {p['max_drawdown_pct']}%"
+        )
+    print("Verdict:", out["verdict"])
+
+
 def cmd_import_csv(a, cfg: Config) -> None:
     from .market_data import import_csv
 
@@ -300,6 +320,12 @@ def main() -> None:
     fw.add_argument("--log", default="runs/predictions.jsonl")
     fw.add_argument("--cost", type=float, default=0.10)
     fw.set_defaults(fn=cmd_forward)
+    rs = sub.add_parser("research", help="trained model + specialist desks, walk-forward paper portfolio")
+    rs.add_argument("--symbols")
+    rs.add_argument("--src", choices=["live", "file", "demo"], default="file")
+    rs.add_argument("--h", type=int, default=5)
+    rs.add_argument("--cost", type=float, default=0.10)
+    rs.set_defaults(fn=cmd_research)
     ic = sub.add_parser("import-csv", help="add a downloaded price CSV (Yahoo, Stooq, ...) to data/")
     ic.add_argument("file")
     ic.add_argument("--symbol", required=True)
